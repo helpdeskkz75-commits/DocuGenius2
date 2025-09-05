@@ -19,18 +19,20 @@ function Router() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <Switch>
-        <Route path="/" component={Dashboard} />
-        <Route path="/conversations" component={Conversations} />
-        <Route path="/leads" component={Leads} />
-        <Route path="/catalog" component={Catalog} />
-        <Route path="/payments" component={Payments} />
-        <Route path="/analytics" component={Analytics} />
-        <Route path="/settings" component={Settings} />
-        <Route path="/test" component={TestPage} />
-        <Route path="/ai-config" component={AiConfigPage} />
-        <Route component={NotFound} />
-      </Switch>
+      <main className="flex-1 lg:ml-64 overflow-x-auto min-h-screen">
+        <Switch>
+          <Route path="/" component={Dashboard} />
+          <Route path="/conversations" component={Conversations} />
+          <Route path="/leads" component={Leads} />
+          <Route path="/catalog" component={Catalog} />
+          <Route path="/payments" component={Payments} />
+          <Route path="/analytics" component={Analytics} />
+          <Route path="/settings" component={Settings} />
+          <Route path="/test" component={TestPage} />
+          <Route path="/ai-config" component={AiConfigPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </main>
     </div>
   );
 }

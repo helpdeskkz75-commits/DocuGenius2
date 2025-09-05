@@ -29,7 +29,7 @@ export function Sidebar() {
   const [location] = useLocation();
 
   return (
-    <aside className="fixed inset-y-0 left-0 w-64 bg-card border-r border-border shadow-sm">
+    <aside className="fixed inset-y-0 left-0 w-64 bg-card border-r border-border shadow-sm z-30 hidden lg:flex">
       <div className="flex flex-col h-full">
         <div className="p-6 border-b border-border">
           <div className="flex items-center space-x-3">

@@ -53,13 +53,13 @@ export default function AiConfigPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 lg:p-6 space-y-6 w-full">
       <h1 className="text-2xl font-semibold">
         Настройка ИИ-помощника по отраслям
       </h1>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div className="rounded-2xl border p-4">
           <div className="text-sm text-muted-foreground">
             Настроенные отрасли
@@ -85,7 +85,7 @@ export default function AiConfigPage() {
         </div>
         <div className="divide-y">
           {items.map((it) => (
-            <div key={it.id} className="p-4 flex items-center">
+            <div key={it.id} className="p-4 flex flex-col sm:flex-row sm:items-center gap-4">
               <div className="flex-1">
                 <div className="font-medium">{it.title}</div>
                 <div className="text-sm text-muted-foreground mt-1">
@@ -98,7 +98,7 @@ export default function AiConfigPage() {
                 )}
               </div>
 
-              <div className="mr-6 flex items-center gap-2">
+              <div className="sm:mr-6 flex items-center gap-2">
                 <span className="text-sm text-muted-foreground">Активна</span>
                 <Switch
                   checked={it.active}
@@ -114,7 +114,7 @@ export default function AiConfigPage() {
 
       {/* Editor dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Настройка ИИ для отрасли: {current?.title}
