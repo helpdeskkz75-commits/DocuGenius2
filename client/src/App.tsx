@@ -11,6 +11,7 @@ import Catalog from "@/pages/catalog";
 import Payments from "@/pages/payments";
 import Analytics from "@/pages/analytics";
 import Settings from "@/pages/settings";
+import TestPage from "@/pages/test";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -25,6 +26,7 @@ function Router() {
         <Route path="/payments" component={Payments} />
         <Route path="/analytics" component={Analytics} />
         <Route path="/settings" component={Settings} />
+        <Route path="/test" component={TestPage} />
         <Route component={NotFound} />
       </Switch>
     </div>

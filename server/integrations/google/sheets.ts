@@ -2,7 +2,10 @@ import { google } from 'googleapis';
 
 function getSheetsClient() {
   const credentialsB64 = process.env.GOOGLE_CREDENTIALS_JSON_BASE64;
-  if (!credentialsB64) throw new Error('GOOGLE_CREDENTIALS_JSON_BASE64 not set');
+  if (!credentialsB64) {
+    console.log('GOOGLE_CREDENTIALS_JSON_BASE64 not set, Google Sheets integration disabled');
+    return null;
+  }
   const json = JSON.parse(Buffer.from(credentialsB64, 'base64').toString('utf-8'));
   const scopes = ['https://www.googleapis.com/auth/spreadsheets'];
   const auth = new google.auth.GoogleAuth({ credentials: json, scopes });
@@ -11,19 +14,31 @@ function getSheetsClient() {
 
 export async function getRows(spreadsheetId: string, range: string) {
   const sheets = getSheetsClient();
-  const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range });
-  return resp.data.values || [];
+  if (!sheets || !spreadsheetId) return [];
+  try {
+    const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range });
+    return resp.data.values || [];
+  } catch (error) {
+    console.error('Error fetching Google Sheets data:', error);
+    return [];
+  }
 }
 
 export async function appendRow(spreadsheetId: string, range: string, values: any[]) {
   const sheets = getSheetsClient();
-  await sheets.spreadsheets.values.append({
-    spreadsheetId, range, valueInputOption: 'USER_ENTERED',
-    requestBody: { values: [values] }
-  });
+  if (!sheets || !spreadsheetId) return;
+  try {
+    await sheets.spreadsheets.values.append({
+      spreadsheetId, range, valueInputOption: 'USER_ENTERED',
+      requestBody: { values: [values] }
+    });
+  } catch (error) {
+    console.error('Error appending to Google Sheets:', error);
+  }
 }
 
 export async function getPriceBySku(spreadsheetId: string, range: string, sku: string) {
+  if (!spreadsheetId) return null;
   const rows = await getRows(spreadsheetId, range);
   if (!rows.length) return null;
   const header = rows[0].map((x: string) => String(x).trim());
@@ -48,6 +63,7 @@ export async function getPriceBySku(spreadsheetId: string, range: string, sku: s
 }
 
 export async function searchProducts(spreadsheetId: string, range: string, query: string) {
+  if (!spreadsheetId) return [];
   const rows = await getRows(spreadsheetId, range);
   if (!rows.length) return [];
   const header = rows[0].map((x: string) => String(x).trim());

@@ -1,4 +1,4 @@
-import { Bot, LayoutDashboard, MessageCircle, Users, Package, QrCode, BarChart3, Settings, User } from "lucide-react";
+import { Bot, LayoutDashboard, MessageCircle, Users, Package, QrCode, BarChart3, Settings, User, TestTube } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +10,7 @@ const navigation = [
   { name: "Payments", href: "/payments", icon: QrCode },
   { name: "Analytics", href: "/analytics", icon: BarChart3 },
   { name: "Settings", href: "/settings", icon: Settings },
+  { name: "Test", href: "/test", icon: TestTube },
 ];
 
 export function Sidebar() {
