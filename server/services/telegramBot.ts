@@ -4,6 +4,7 @@ import { getPriceBySku, searchProducts, appendRow } from '../integrations/google
 import { generateQrPngBuffer } from '../services/qr';
 import { funnelService } from '../services/funnel';
 import { detectLang } from '../services/langDetect';
+import { audioTranscriptionService } from '../services/audioTranscription';
 
 class TelegramBotService {
   private bot: TelegramBot | null = null;
@@ -197,6 +198,25 @@ class TelegramBotService {
         }
       }
     });
+    // === Audio Message Processing ===
+    
+    // Handle voice messages
+    this.bot.on('voice', async (msg) => {
+      await this.handleAudioMessage(msg, 'voice');
+    });
+
+    // Handle audio files
+    this.bot.on('audio', async (msg) => {
+      await this.handleAudioMessage(msg, 'audio');
+    });
+
+    // Handle document audio files (e.g., .mp3, .wav uploaded as documents)
+    this.bot.on('document', async (msg) => {
+      if (msg.document && msg.document.mime_type?.startsWith('audio/')) {
+        await this.handleAudioMessage(msg, 'document');
+      }
+    });
+
     // === End of AI Assist MVP commands ===
   }
 
@@ -207,6 +227,121 @@ class TelegramBotService {
       console.error('Telegram bot error:', error);
       storage.updateSystemStatus('Telegram Bot', 'error', error.message);
     });
+  }
+
+  /**
+   * Handle audio message processing (voice, audio files, documents)
+   */
+  private async handleAudioMessage(msg: any, type: 'voice' | 'audio' | 'document') {
+    const chatId = msg.chat.id;
+    
+    try {
+      // Send typing indicator while processing
+      await this.bot!.sendChatAction(chatId, 'typing');
+      
+      // Get file info based on message type
+      let fileId: string;
+      let duration: number | undefined;
+      
+      switch (type) {
+        case 'voice':
+          fileId = msg.voice.file_id;
+          duration = msg.voice.duration;
+          break;
+        case 'audio':
+          fileId = msg.audio.file_id;
+          duration = msg.audio.duration;
+          break;
+        case 'document':
+          fileId = msg.document.file_id;
+          break;
+        default:
+          throw new Error('Unsupported audio type');
+      }
+
+      // Get file URL from Telegram
+      const fileInfo = await this.bot!.getFile(fileId);
+      const fileUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
+      
+      // Send status message
+      const statusMsg = await this.bot!.sendMessage(chatId, '🎙️ Обрабатываю аудио сообщение...');
+      
+      // Transcribe audio
+      const transcription = await audioTranscriptionService.processAudioMessage(fileUrl, fileInfo.file_path);
+      
+      // Edit status message with transcription
+      await this.bot!.editMessageText(
+        `🎙️ Распознанный текст:\n"${transcription.text}"\n\n⏳ Генерирую ответ...`,
+        {
+          chat_id: chatId,
+          message_id: statusMsg.message_id,
+        }
+      );
+      
+      // Update conversation with transcribed text
+      await storage.updateConversation(chatId.toString(), {
+        lastMessage: `[Аудио] ${transcription.text}`,
+        updatedAt: new Date()
+      });
+
+      // Process transcribed text as regular message
+      await this.processTranscribedText(chatId, transcription.text, transcription);
+      
+      // Delete status message
+      await this.bot!.deleteMessage(chatId, statusMsg.message_id);
+      
+    } catch (error: any) {
+      console.error('Error processing audio message:', error);
+      
+      let errorMessage = '❌ Не удалось обработать аудио сообщение.';
+      
+      if (error.message.includes('too large')) {
+        errorMessage = '❌ Аудио файл слишком большой (максимум 25МБ). Попробуйте отправить более короткую запись.';
+      } else if (error.message.includes('download')) {
+        errorMessage = '❌ Не удалось скачать аудио файл. Попробуйте ещё раз.';
+      } else if (error.message.includes('Transcription failed')) {
+        errorMessage = '❌ Не удалось распознать речь. Убедитесь, что запись содержит речь на русском или казахском языке.';
+      }
+      
+      await this.bot!.sendMessage(chatId, errorMessage);
+    }
+  }
+
+  /**
+   * Process transcribed text through the bot's AI logic
+   */
+  private async processTranscribedText(chatId: number, text: string, transcription: any) {
+    try {
+      // Determine language for AI response
+      const language = audioTranscriptionService.getLanguageForAI(transcription);
+      
+      // Check if there's an active funnel session
+      if (!(funnelService as any).sessions?.has(chatId)) {
+        // Start new funnel session with detected language
+        const first = funnelService.start(chatId, language as any);
+        await this.bot!.sendMessage(chatId, first);
+      } else {
+        // Process through existing funnel/AI logic
+        try {
+          const aiResponse = await funnelService.generateAIResponse(chatId, text);
+          if (aiResponse) {
+            // Add language indicator for user
+            const languageEmoji = language === 'kk' ? '🇰🇿' : '🇷🇺';
+            await this.bot!.sendMessage(chatId, `${languageEmoji} ${aiResponse}`);
+          } else {
+            const reply = funnelService.next(chatId, text);
+            if (reply) await this.bot!.sendMessage(chatId, reply);
+          }
+        } catch (error) {
+          // Fallback to basic funnel
+          const reply = funnelService.next(chatId, text);
+          if (reply) await this.bot!.sendMessage(chatId, reply);
+        }
+      }
+    } catch (error) {
+      console.error('Error processing transcribed text:', error);
+      await this.bot!.sendMessage(chatId, 'Понял ваше сообщение, но возникла ошибка при обработке. Попробуйте ещё раз или напишите текстом.');
+    }
   }
 
   private async setupCommands() {

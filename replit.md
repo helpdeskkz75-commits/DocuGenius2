@@ -35,7 +35,9 @@ Preferred communication style: Simple, everyday language.
 ### AI and Bot Features
 - **Multi-channel Support**: Telegram and WhatsApp integration with unified bot logic
 - **OpenAI Integration**: GPT-powered conversational AI with industry-specific prompts
-- **Language Detection**: Automatic Kazakh/Russian language detection and response
+- **Audio Processing**: Voice message transcription using OpenAI Whisper API
+- **Language Detection**: Automatic Kazakh/Russian language detection for both text and audio
+- **Voice-to-Text**: Real-time speech recognition with support for Russian and Kazakh languages
 - **Conversational Funnel**: 3-step lead qualification process with AI fallback
 - **Industry Adaptation**: AI personality and responses tailored to 12+ business sectors
 - **Smart Recommendations**: AI-powered product suggestions based on user queries
