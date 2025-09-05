@@ -1,0 +1,553 @@
+--- a/server/routes.ts+++ b/server/routes.ts@@ -1,6 +1,9 @@ import type { Express } from "express";
+ import { createServer, type Server } from "http";
+ import { storage } from "./storage";
++import { getWAClient } from "./integrations/whatsapp/factory";
++import { getPriceBySku, searchProducts, appendRow } from "./integrations/google/sheets";
++import { generateQrPngBuffer } from "./services/qr";
+ import { telegramBotService } from "./services/telegramBot";
+ import { documentGenerator } from "./services/documentGenerator";
+ import { googleDriveService } from "./services/googleDriveService";
+@@ -285,6 +288,152 @@ 
+   const httpServer = createServer(app);
+   return httpServer;
++
++// === AI Assist MVP routes (catalog/pricing/leads/wa/qr) ===
++  app.get("/api/catalog/price/:sku", async (req, res) => {
++    try {
++      const sheetId = process.env.PRICES_SHEET_ID as string;
++      const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
++      if (!sheetId) return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
++      const item = await getPriceBySku(sheetId, range, req.params.sku);
++      if (!item) return res.status(404).json({ error: "SKU not found" });
++      res.json(item);
++    } catch (e: any) {
++      res.status(500).json({ error: e.message || "Failed" });
++    }
++  });
++
++  app.get("/api/catalog/search", async (req, res) => {
++    try {
++      const q = String(req.query.q || "");
++      const sheetId = process.env.PRICES_SHEET_ID as string;
++      const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
++      if (!sheetId) return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
++      const items = await searchProducts(sheetId, range, q);
++      res.json(items);
++    } catch (e: any) {
++      res.status(500).json({ error: e.message || "Failed" });
++    }
++  });
++
++  app.post("/api/leads", async (req, res) => {
++    try {
++      const { channel, name, phone, items, sum } = req.body || {};
++      const leadId = "ld_" + Date.now();
++      const leadsSheetId = process.env.LEADS_SHEET_ID;
++      const leadsRange = process.env.LEADS_RANGE || "Sheet1!A:Z";
++      if (leadsSheetId) {
++        await appendRow(
++          leadsSheetId, leadsRange,
++          [leadId, channel || 'tg', name || '', phone || '', JSON.stringify(items||[]), sum || 0, "NEW", new Date().toISOString()]
++        );
++      }
++      const qr = await generateQrPngBuffer(`pay://${leadId}`);
++      res.setHeader("Content-Type", "image/png");
++      res.send(qr);
++    } catch (e: any) {
++      res.status(500).json({ error: e.message || "Failed" });
++    }
++  });
++
++  app.post("/api/payments/qr/callback", async (req, res) => {
++    const sig = req.header("x-signature");
++    if (!sig || sig !== process.env.PAYMENT_CALLBACK_SECRET) return res.status(403).json({ error: "bad signature" });
++    // TODO: mark lead as PAID in Google Sheets by LeadID
++    res.json({ ok: true });
++  });
++
++  
++app.post("/api/whatsapp/webhook", async (req, res) => {
++  try {
++    const body = req.body || {};
++    // 360dialog typical payload: { contacts: [...], messages: [{ from, text: { body } }] }
++    const msg = (body.messages && body.messages[0]) || null;
++    if (!msg) return res.json({ ok: true });
++    const from = msg.from || (msg.sender && msg.sender.id);
++    let text = '';
++    if (msg.text && msg.text.body) text = msg.text.body;
++    else if (msg.button && msg.button.text) text = msg.button.text;
++    else if (msg.interactive && msg.interactive.button_reply && msg.interactive.button_reply.title) text = msg.interactive.button_reply.title;
++    if (!from) return res.json({ ok: true });
++
++    const wa = getWAClient();
++
++    // Commands
++    const lower = String(text || '').trim().toLowerCase();
++    const sheetId = process.env.PRICES_SHEET_ID as string;
++    const range = process.env.PRICES_RANGE || 'Sheet1!A:Z';
++
++    if (lower.startsWith('/price')) {
++      const parts = lower.split(' ').filter(Boolean);
++      const sku = parts[1];
++      if (!sku) {
++        await wa.sendText(from, 'Укажите SKU: /price <sku>');
++      } else {
++        const item = await getPriceBySku(sheetId, range, sku);
++        if (!item) await wa.sendText(from, 'Не нашел такой SKU');
++        else await wa.sendText(from, `${item.Name} — ${item.Price} ${item.Currency || ''} (SKU ${item.SKU})`);
++      }
++      return res.json({ ok: true });
++    }
++
++    if (lower.startsWith('/find')) {
++      const q = lower.replace('/find', '').trim();
++      const items = await searchProducts(sheetId, range, q);
++      if (!items.length) await wa.sendText(from, 'Ничего не найдено');
++      else {
++        const top = items.slice(0,5).map(i => `• ${i.Name} — ${i.Price} ${i.Currency || ''} (SKU ${i.SKU})`).join('
++');
++        await wa.sendText(from, top);
++      }
++      return res.json({ ok: true });
++    }
++
++    if (lower.startsWith('/order')) {
++      const leadsSheetId = process.env.LEADS_SHEET_ID;
++      const leadsRange = process.env.LEADS_RANGE || 'Sheet1!A:Z';
++      const leadId = 'ld_' + Date.now();
++      if (leadsSheetId) {
++        await appendRow(leadsSheetId, leadsRange, [leadId, 'wa', from, '', '[]', 0, 'NEW', new Date().toISOString()]);
++      }
++      await wa.sendText(from, 'Заявка создана. Мы пришлём ссылку/QR для оплаты.');
++      return res.json({ ok: true });
++    }
++
++    // 2GIS and callback keywords
++    if (lower.includes('2gis') || lower.includes('навигац')) {
++      const url = process.env.TWO_GIS_URL || 'https://2gis.kz';
++      await wa.sendText(from, url);
++      return res.json({ ok: true });
++    }
++    if (lower.includes('перезвон')) {
++      const cbSheetId = process.env.CALLBACKS_SHEET_ID || process.env.LEADS_SHEET_ID;
++      const cbRange = process.env.CALLBACKS_RANGE || process.env.LEADS_RANGE || 'Sheet1!A:Z';
++      if (cbSheetId) {
++        await appendRow(cbSheetId, cbRange, ['cb_' + Date.now(), 'wa', from, '', 'CALLBACK', new Date().toISOString()]);
++      }
++      await wa.sendText(from, 'Принято. Менеджер перезвонит.');
++      return res.json({ ok: true });
++    }
++
++    // Funnel fallback (shared orchestrator)
++    const { funnelService } = await import("./services/funnel");
++    const { detectLang } = await import("./services/langDetect");
++    if (!funnelService.has(from)) {
++      const first = funnelService.start(from, detectLang(text) as any);
++      await wa.sendText(from, first);
++    } else {
++      const reply = funnelService.next(from, text);
++      if (reply) await wa.sendText(from, reply);
++    }
++    return res.json({ ok: true });
++  } catch (e: any) {
++    console.error('WA webhook error', e);
++    return res.status(200).json({ ok: true }); // don't retry storms on provider
++  }
++});
++  });
++// === End of AI Assist MVP routes ===
+ }
+ 
+ function getTimeAgo(date: Date): string {
+--- a/server/services/telegramBot.ts+++ b/server/services/telegramBot.ts@@ -2,6 +2,10 @@ import { storage } from '../storage';
+ import { documentGenerator } from './documentGenerator';
+ import { googleDriveService } from './googleDriveService';
++import { getPriceBySku, searchProducts, appendRow } from '../integrations/google/sheets';
++import { generateQrPngBuffer } from '../services/qr';
++import { funnelService } from '../services/funnel';
++import { detectLang } from '../services/langDetect';
+ 
+ class TelegramBotService {
+   private bot: TelegramBot | null = null;
+@@ -19,7 +23,140 @@     await this.setupMessageHandlers();
+     this.isInitialized = true;
+     console.log('Telegram bot initialized successfully');
+-  }
++  
++// === AI Assist MVP commands ===
++await this.bot.setMyCommands([
++  { command: 'start', description: 'Начать' },
++  { command: 'stop', description: 'Передать диалог менеджеру' },
++  { command: 'price', description: 'Цена по SKU' },
++  { command: 'find', description: 'Поиск товара' },
++  { command: 'promo', description: 'Каталог/акции' },
++  { command: 'order', description: 'Создать заявку и оплату' }
++]);
++
++// stop/hand-over
++this.bot.onText(/\/stop/, async (msg) => {
++  const chatId = msg.chat.id;
++  await this.bot!.sendMessage(chatId, 'Передал диалог менеджеру. Ожидайте, он подключится.');
++  const groupId = process.env.TELEGRAM_OPERATORS_GROUP_ID;
++  if (groupId) {
++    await this.bot!.sendMessage(Number(groupId), `Хэндовер: чат ${chatId} передан менеджеру.`);
++  }
++});
++
++// price
++this.bot.onText(/\/price (.+)/, async (msg, match) => {
++  const chatId = msg.chat.id;
++  const sku = (match?.[1] || '').trim();
++  if (!sku) return this.bot!.sendMessage(chatId, 'Укажите SKU: /price <sku>');
++  const sheetId = process.env.PRICES_SHEET_ID as string;
++  const range = process.env.PRICES_RANGE || 'Sheet1!A:Z';
++  try {
++    const item = await getPriceBySku(sheetId, range, sku);
++    if (!item) return this.bot!.sendMessage(chatId, 'Не нашел такой SKU');
++    let text = `${item.Name} — ${item.Price} ${item.Currency || ''}\nSKU: ${item.SKU}`;
++    if (item.PhotoURL) await this.bot!.sendPhoto(chatId, item.PhotoURL, { caption: text });
++    else await this.bot!.sendMessage(chatId, text);
++  } catch (e:any) {
++    await this.bot!.sendMessage(chatId, 'Ошибка при получении цены');
++  }
++});
++
++// find
++this.bot.onText(/\/find (.+)/, async (msg, match) => {
++  const chatId = msg.chat.id;
++  const q = (match?.[1] || '').trim();
++  const sheetId = process.env.PRICES_SHEET_ID as string;
++  const range = process.env.PRICES_RANGE || 'Sheet1!A:Z';
++  try {
++    const items = await searchProducts(sheetId, range, q);
++    if (!items.length) return this.bot!.sendMessage(chatId, 'Ничего не найдено');
++    const top = items.slice(0,5).map(i => `• ${i.Name} — ${i.Price} ${i.Currency || ''} (SKU ${i.SKU})`).join('\n');
++    await this.bot!.sendMessage(chatId, top);
++  } catch (e:any) {
++    await this.bot!.sendMessage(chatId, 'Ошибка поиска');
++  }
++});
++
++// promo
++this.bot.onText(/\/promo/, async (msg) => {
++  const chatId = msg.chat.id;
++  const url = process.env.PROMO_URL || 'https://example.com';
++  await this.bot!.sendMessage(chatId, 'Каталог и акции:', {
++    reply_markup: { inline_keyboard: [[{ text: 'Открыть', url }]] } as any
++  });
++});
++
++// order -> create lead + QR
++this.bot.onText(/\/order/, async (msg) => {
++  const chatId = msg.chat.id;
++  const leadsSheetId = process.env.LEADS_SHEET_ID;
++  const leadsRange = process.env.LEADS_RANGE || 'Sheet1!A:Z';
++  const leadId = 'ld_' + Date.now();
++  try {
++    if (leadsSheetId) {
++      await appendRow(leadsSheetId, leadsRange, [leadId, 'tg', msg.from?.username || '', '', '[]', 0, 'NEW', new Date().toISOString()]);
++    }
++    const png = await generateQrPngBuffer(`pay://${leadId}`);
++    await this.bot!.sendPhoto(chatId, png, { caption: 'Отсканируйте QR для оплаты' });
++    const groupId = process.env.TELEGRAM_OPERATORS_GROUP_ID;
++    if (groupId) await this.bot!.sendMessage(Number(groupId), `Новая заявка ${leadId} из чата ${chatId}`);
++  } catch (e:any) {
++    await this.bot!.sendMessage(chatId, 'Не удалось создать заявку');
++  }
++});
++
++// start with keyboard
++this.bot.onText(/\/start/, async (msg) => {
++  const chatId = msg.chat.id;
++  const keyboard = {
++    keyboard: [[{ text: '🧭 Навигация (2GIS)' }, { text: '📞 Перезвонить' }]],
++    resize_keyboard: true
++  };
++  await this.bot!.sendMessage(chatId, 'Выберите действие или опишите ваш запрос:', { reply_markup: keyboard as any });
++  const first = funnelService.start(chatId, 'ru' as any);
++  await this.bot!.sendMessage(chatId, first);
++});
++
++// 2GIS + Перезвон (text buttons)
++this.bot.on('message', async (msg) => {
++  if (!msg.text) return;
++  const text = msg.text.trim().toLowerCase();
++  const chatId = msg.chat.id;
++  if (text.includes('навигац') || text.includes('2gis')) {
++    const url = process.env.TWO_GIS_URL || 'https://2gis.kz';
++    return this.bot!.sendMessage(chatId, url);
++  }
++  if (text.includes('перезвон')) {
++    const leadsSheetId = process.env.CALLBACKS_SHEET_ID || process.env.LEADS_SHEET_ID;
++    const leadsRange = process.env.CALLBACKS_RANGE || process.env.LEADS_RANGE || 'Sheet1!A:Z';
++    if (leadsSheetId) {
++      await appendRow(leadsSheetId, leadsRange, ['cb_' + Date.now(), 'tg', msg.from?.username || '', msg.contact?.phone_number || '', 'CALLBACK', new Date().toISOString()]);
++    }
++    const groupId = process.env.TELEGRAM_OPERATORS_GROUP_ID;
++    if (groupId) await this.bot!.sendMessage(Number(groupId), `Запрошен перезвон из чата ${chatId}`);
++    return this.bot!.sendMessage(chatId, 'Принято. Менеджер скоро перезвонит.');
++  }
++});
++
++// language + 3-step funnel as fallback
++this.bot.on('message', async (msg) => {
++  if (!msg.text) return;
++  if (msg.text.startsWith('/')) return; // skip commands
++  const chatId = msg.chat.id;
++  const t = msg.text || '';
++  if (!(funnelService as any).sessions?.has(chatId)) {
++    const lang = detectLang(t);
++    const first = funnelService.start(chatId, lang as any);
++    await this.bot!.sendMessage(chatId, first);
++  } else {
++    const reply = funnelService.next(chatId, t);
++    if (reply) await this.bot!.sendMessage(chatId, reply);
++  }
++});
++// === End of AI Assist MVP commands ===
++
++}
+ 
+   private async setupCommands() {
+     if (!this.bot) return;
+--- a/README_PATCH.txt+++ b/README_PATCH.txt@@ -0,0 +1,30 @@+# DocuGenius MVP Patch (AI Assist)
++Added:
++- language detection + 3-step funnel (server/services/{langDetect,funnel}.ts)
++- Google Sheets catalog & leads (server/integrations/google/sheets.ts)
++- QR payment mock (server/services/qr.ts; routes for leads & callback)
++- WhatsApp provider skeleton (server/integrations/whatsapp/*)
++- New bot commands: /stop, /price, /find, /promo, /order
++
++ENV to add:
++  TELEGRAM_BOT_TOKEN=...
++  TELEGRAM_OPERATORS_GROUP_ID=... # optional
++  PRICES_SHEET_ID=...
++  PRICES_RANGE=Sheet1!A:Z
++  LEADS_SHEET_ID=...              # optional
++  LEADS_RANGE=Sheet1!A:Z
++  GOOGLE_CREDENTIALS_JSON_BASE64=...
++  PROMO_URL=https://example.com
++  PAYMENT_CALLBACK_SECRET=...
++  WA_PROVIDER=360dialog
++  WA_API_URL=https://waba.360dialog.io/v1
++  WA_API_KEY=...
++  WA_PHONE_NUMBER_ID=...
++
++NPM:
++  npm i googleapis qrcode
++
++Additional ENV:
++  TWO_GIS_URL=https://2gis.kz/astana/search/YourAddress
++  CALLBACKS_SHEET_ID=<ID таблицы для перезвонов>
++  CALLBACKS_RANGE=Sheet1!A:Z
+--- a/server/integrations/google/sheets.ts+++ b/server/integrations/google/sheets.ts@@ -0,0 +1,77 @@+import { google } from 'googleapis';
++
++function getSheetsClient() {
++  const credentialsB64 = process.env.GOOGLE_CREDENTIALS_JSON_BASE64;
++  if (!credentialsB64) throw new Error('GOOGLE_CREDENTIALS_JSON_BASE64 not set');
++  const json = JSON.parse(Buffer.from(credentialsB64, 'base64').toString('utf-8'));
++  const scopes = ['https://www.googleapis.com/auth/spreadsheets'];
++  const auth = new google.auth.GoogleAuth({ credentials: json, scopes });
++  return google.sheets({ version: 'v4', auth });
++}
++
++export async function getRows(spreadsheetId: string, range: string) {
++  const sheets = getSheetsClient();
++  const resp = await sheets.spreadsheets.values.get({ spreadsheetId, range });
++  return resp.data.values || [];
++}
++
++export async function appendRow(spreadsheetId: string, range: string, values: any[]) {
++  const sheets = getSheetsClient();
++  await sheets.spreadsheets.values.append({
++    spreadsheetId, range, valueInputOption: 'USER_ENTERED',
++    requestBody: { values: [values] }
++  });
++}
++
++export async function getPriceBySku(spreadsheetId: string, range: string, sku: string) {
++  const rows = await getRows(spreadsheetId, range);
++  if (!rows.length) return null;
++  const header = rows[0].map((x: string) => String(x).trim());
++  const idx = {
++    SKU: header.indexOf('SKU'),
++    Name: header.indexOf('Name'),
++    Category: header.indexOf('Category'),
++    Price: header.indexOf('Price'),
++    Currency: header.indexOf('Currency'),
++    PhotoURL: header.indexOf('PhotoURL'),
++  };
++  for (let i=1; i<rows.length; i++) {
++    const r = rows[i];
++    if (String(r[idx.SKU] || '').trim().toLowerCase() === sku.trim().toLowerCase()) {
++      return {
++        SKU: r[idx.SKU], Name: r[idx.Name], Category: r[idx.Category],
++        Price: r[idx.Price], Currency: r[idx.Currency], PhotoURL: r[idx.PhotoURL]
++      };
++    }
++  }
++  return null;
++}
++
++export async function searchProducts(spreadsheetId: string, range: string, query: string) {
++  const rows = await getRows(spreadsheetId, range);
++  if (!rows.length) return [];
++  const header = rows[0].map((x: string) => String(x).trim());
++  const idx = {
++    SKU: header.indexOf('SKU'),
++    Name: header.indexOf('Name'),
++    Category: header.indexOf('Category'),
++    Price: header.indexOf('Price'),
++    Currency: header.indexOf('Currency'),
++    PhotoURL: header.indexOf('PhotoURL'),
++  };
++  const q = query.trim().toLowerCase();
++  const out: any[] = [];
++  for (let i=1; i<rows.length; i++) {
++    const r = rows[i];
++    const name = String(r[idx.Name] || '').toLowerCase();
++    const cat = String(r[idx.Category] || '').toLowerCase();
++    if (name.includes(q) || cat.includes(q)) {
++      out.push({
++        SKU: r[idx.SKU], Name: r[idx.Name], Category: r[idx.Category],
++        Price: r[idx.Price], Currency: r[idx.Currency], PhotoURL: r[idx.PhotoURL]
++      });
++    }
++    if (out.length >= 10) break;
++  }
++  return out;
++}
+--- a/server/integrations/whatsapp/base.ts+++ b/server/integrations/whatsapp/base.ts@@ -0,0 +1,3 @@+export interface WAClient {
++  sendText(to: string, text: string): Promise<void>;
++}
+--- a/server/integrations/whatsapp/factory.ts+++ b/server/integrations/whatsapp/factory.ts@@ -0,0 +1,10 @@+import { WAClient } from './base';
++import { WA360Client } from './wa360dialog';
++
++export function getWAClient(): WAClient {
++  const prov = (process.env.WA_PROVIDER || '360dialog').toLowerCase();
++  switch (prov) {
++    case '360dialog': return new WA360Client();
++    default: throw new Error('Unknown WA provider: ' + prov);
++  }
++}
+--- a/server/integrations/whatsapp/wa360dialog.ts+++ b/server/integrations/whatsapp/wa360dialog.ts@@ -0,0 +1,28 @@+import { WAClient } from './base';
++
++export class WA360Client implements WAClient {
++  private url: string;
++  private key: string;
++  private phoneId: string;
++
++  constructor() {
++    this.url = (process.env.WA_API_URL || '').replace(/\/$/, '');
++    this.key = process.env.WA_API_KEY || '';
++    this.phoneId = process.env.WA_PHONE_NUMBER_ID || '';
++    if (!this.url || !this.key) {
++      throw new Error('WA_API_URL/WA_API_KEY not set');
++    }
++  }
++
++  async sendText(to: string, text: string) {
++    const resp = await fetch(`${this.url}/messages`, {
++      method: 'POST',
++      headers: { 'Content-Type': 'application/json', 'D360-API-KEY': this.key },
++      body: JSON.stringify({ to, type: 'text', text: { body: text } })
++    });
++    if (!resp.ok) {
++      const t = await resp.text();
++      throw new Error(`WA send failed: ${resp.status} ${t}`);
++    }
++  }
++}
+--- a/server/services/funnel.ts+++ b/server/services/funnel.ts@@ -0,0 +1,67 @@+type Lang = 'ru' | 'kz';
++export type FunnelStep = 0 | 1 | 2 | 3;
++
++export interface FunnelState {
++  step: FunnelStep;
++  lang: Lang;
++  answers: Record<string, string>;
++}
++
++const PROMPTS: Record<Lang, [string, string, string]> = {
++  ru: [
++    "Что именно вам нужно? (материал/товар/марка)",
++    "Уточните объём и параметры (кол-во, размеры, сопутствующие требования)",
++    "Есть ли ориентир по бюджету и срокам?"
++  ],
++  kz: [
++    "Нақты не қажет? (материал/тауар/марка)",
++    "Көлемі мен параметрлерін нақтылаңыз (саны, өлшемі, қосымша талаптар)",
++    "Бюджет пен мерзім бойынша бағдар бар ма?"
++  ],
++};
++
++const SUMMARY: Record<Lang, string> = {
++  ru: "Резюме запроса:\n- Что: {what}\n- Параметры: {spec}\n- Бюджет/срок: {budget}\n\nГотов предложить 1–3 варианта из каталога. Продолжим?",
++  kz: "Сұраныс қорытындысы:\n- Не: {what}\n- Параметрлер: {spec}\n- Бюджет/мерзім: {budget}\n\nКаталогтан 1–3 нұсқа ұсына аламын. Жалғастырамыз ба?",
++};
++
++export class FunnelService {
++  sessions = new Map<any, FunnelState>();
++
++  start(chatId: any, lang: Lang): string {
++    this.sessions.set(chatId, { step: 1, lang, answers: {} });
++    return PROMPTS[lang][0];
++  }
++
++  has(chatId: any): boolean {
++    return this.sessions.has(chatId);
++  }
++
++  next(chatId: any, text: string): string {
++    const s = this.sessions.get(chatId);
++    if (!s) return "";
++    if (s.step === 1) {
++      s.answers.what = text;
++      s.step = 2;
++      return PROMPTS[s.lang][1];
++    } else if (s.step === 2) {
++      s.answers.spec = text;
++      s.step = 3;
++      return PROMPTS[s.lang][2];
++    } else {
++      s.answers.budget = text;
++      const msg = SUMMARY[s.lang]
++        .replace("{what}", s.answers.what || "—")
++        .replace("{spec}", s.answers.spec || "—")
++        .replace("{budget}", s.answers.budget || "—");
++      this.sessions.delete(chatId);
++      return msg;
++    }
++  }
++
++  cancel(chatId: any) {
++    this.sessions.delete(chatId);
++  }
++}
++
++export const funnelService = new FunnelService();
+--- a/server/services/langDetect.ts+++ b/server/services/langDetect.ts@@ -0,0 +1,9 @@+// Simple heuristic Kazakh/Russian detection
++export function detectLang(text: string | undefined | null): 'kz' | 'ru' {
++  if (!text) return 'ru';
++  const t = text.trim().toLowerCase();
++  const kzHints = /(иә|жоқ|сәлем|рахмет|қалай|түбіртек|бағасы|мерзім|мердігер|жеткізу)/i;
++  const kzLetters = /[ңқәүгұһі]/i;
++  if (kzHints.test(t) || kzLetters.test(t)) return 'kz';
++  return 'ru';
++}
+--- a/server/services/qr.ts+++ b/server/services/qr.ts@@ -0,0 +1,7 @@+import QRCode from 'qrcode';
++
++export async function generateQrPngBuffer(data: string): Promise<Buffer> {
++  const dataUrl = await QRCode.toDataURL(data);
++  const base64 = dataUrl.split(',')[1];
++  return Buffer.from(base64, 'base64');
++}
+--- a/package.json+++ b/package.json@@ -76,7 +76,9 @@     "wouter": "^3.3.5",
+     "ws": "^8.18.0",
+     "zod": "^3.24.2",
+-    "zod-validation-error": "^3.4.0"
++    "zod-validation-error": "^3.4.0",
++    "googleapis": "^136.0.0",
++    "qrcode": "^1.5.4"
+   },
+   "devDependencies": {
+     "@replit/vite-plugin-cartographer": "^0.3.0",
