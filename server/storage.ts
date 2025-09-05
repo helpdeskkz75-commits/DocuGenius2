@@ -1,7 +1,7 @@
-import { 
-  type User, 
-  type InsertUser, 
-  type Conversation, 
+import {
+  type User,
+  type InsertUser,
+  type Conversation,
   type InsertConversation,
   type Lead,
   type InsertLead,
@@ -10,7 +10,10 @@ import {
   type BotCommand,
   type InsertBotCommand,
   type SystemStatus,
-  type InsertSystemStatus
+  type InsertSystemStatus,
+  type IndustryConfig,
+  type InsertIndustryConfig,
+  industryKeys,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -24,7 +27,10 @@ export interface IStorage {
   getConversations(): Promise<Conversation[]>;
   getConversation(id: string): Promise<Conversation | undefined>;
   createConversation(conversation: InsertConversation): Promise<Conversation>;
-  updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined>;
+  updateConversation(
+    id: string,
+    updates: Partial<Conversation>,
+  ): Promise<Conversation | undefined>;
 
   // Lead methods
   getLeads(): Promise<Lead[]>;
@@ -45,7 +51,11 @@ export interface IStorage {
 
   // System status methods
   getSystemStatus(): Promise<SystemStatus[]>;
-  updateSystemStatus(serviceName: string, status: string, description?: string): Promise<void>;
+  updateSystemStatus(
+    serviceName: string,
+    status: string,
+    description?: string,
+  ): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -56,6 +66,37 @@ export class MemStorage implements IStorage {
   private botCommands: Map<string, BotCommand>;
   private systemStatus: Map<string, SystemStatus>;
 
+  private industryConfigs = new Map<string, IndustryConfig>();
+
+  // ---- AI Industry Configs ----
+  async getIndustryConfigs(): Promise<IndustryConfig[]> {
+    return Array.from(this.industryConfigs.values());
+  }
+
+  async getIndustryConfig(id: string): Promise<IndustryConfig | undefined> {
+    return this.industryConfigs.get(id);
+  }
+
+  async createIndustryConfig(
+    data: InsertIndustryConfig,
+  ): Promise<IndustryConfig> {
+    const id = randomUUID();
+    const rec: IndustryConfig = { id, ...data };
+    this.industryConfigs.set(id, rec);
+    return rec;
+  }
+
+  async updateIndustryConfig(
+    id: string,
+    updates: Partial<IndustryConfig>,
+  ): Promise<IndustryConfig | undefined> {
+    const cur = this.industryConfigs.get(id);
+    if (!cur) return undefined;
+    const next = { ...cur, ...updates, id: cur.id };
+    this.industryConfigs.set(id, next);
+    return next;
+  }
+
   constructor() {
     this.users = new Map();
     this.conversations = new Map();
@@ -63,6 +104,62 @@ export class MemStorage implements IStorage {
     this.products = new Map();
     this.botCommands = new Map();
     this.systemStatus = new Map();
+
+    // --- Seed AI industries ---
+        const seed: InsertIndustryConfig[] = [
+          {
+            key: "dentistry",
+            title: "Стоматология",
+            active: true,
+            usersCount: 24,
+            systemPrompt:
+    `Ты — помощник для создания документов и общения с клиентами в сфере стоматологии.
+    При создании договоров учитывай специфику медицинских услуг:
+    - Указывай необходимые лицензии и сертификаты
+    - Включай информацию о гарантийных обязательствах
+    - Учитывай особенности медправа РК
+    - Используй профессиональную терминологию
+
+    Всегда уточняй у пользователя:
+    - Тип стоматологической услуги
+    - Стоимость лечения
+    - Сроки оказания услуги
+    - Гарантийные обязательства`,
+          },
+          {
+            key: "restaurant",
+            title: "Ресторанный бизнес",
+            active: true,
+            usersCount: 18,
+            systemPrompt:
+    `Ты — помощник ресторана. Помогаешь с меню, бронированием, банкетами, поставщиками и актами.
+    Всегда уточняй формат мероприятия, количество гостей, бюджет, тайминг.`,
+          },
+          {
+            key: "construction",
+            title: "Строительство",
+            active: true,
+            usersCount: 31,
+            systemPrompt:
+    `Ты — помощник строительной компании. Договора подряда, ТЗ, акты КС-2/КС-3, технадзор.
+    Учитывай СНИПы, сроки, гарантию и риски.`,
+          },
+          {
+            key: "legal",
+            title: "Юридические услуги",
+            active: true,
+            usersCount: 12,
+            systemPrompt:
+    `Ты — ассистент юрфирмы. Брифуешь клиента, формируешь договор, доверенность, претензии.
+    Уточняй юрисдикцию, сроки и бюджет.`,
+          },
+        ];
+
+        seed.forEach((s) => {
+          const id = randomUUID();
+          this.industryConfigs.set(id, { id, ...s });
+        });
+      }
     
     // Initialize with some system status entries
     this.initializeSystemStatus();
@@ -70,19 +167,35 @@ export class MemStorage implements IStorage {
 
   private initializeSystemStatus() {
     const services = [
-      { serviceName: "Telegram Bot", status: "online", description: "Message processing" },
-      { serviceName: "WhatsApp API", status: "online", description: "360Dialog integration" },
-      { serviceName: "Google Sheets", status: "online", description: "Data storage" },
-      { serviceName: "Payment System", status: "online", description: "QR code generation" }
+      {
+        serviceName: "Telegram Bot",
+        status: "online",
+        description: "Message processing",
+      },
+      {
+        serviceName: "WhatsApp API",
+        status: "online",
+        description: "360Dialog integration",
+      },
+      {
+        serviceName: "Google Sheets",
+        status: "online",
+        description: "Data storage",
+      },
+      {
+        serviceName: "Payment System",
+        status: "online",
+        description: "QR code generation",
+      },
     ];
 
-    services.forEach(service => {
+    services.forEach((service) => {
       const status: SystemStatus = {
         id: randomUUID(),
         serviceName: service.serviceName,
         status: service.status,
         description: service.description,
-        lastCheck: new Date()
+        lastCheck: new Date(),
       };
       this.systemStatus.set(service.serviceName, status);
     });
@@ -106,8 +219,10 @@ export class MemStorage implements IStorage {
   }
 
   async getConversations(): Promise<Conversation[]> {
-    return Array.from(this.conversations.values()).sort((a, b) => 
-      new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+    return Array.from(this.conversations.values()).sort(
+      (a, b) =>
+        new Date(b.updatedAt || 0).getTime() -
+        new Date(a.updatedAt || 0).getTime(),
     );
   }
 
@@ -115,35 +230,42 @@ export class MemStorage implements IStorage {
     return this.conversations.get(id);
   }
 
-  async createConversation(insertConversation: InsertConversation): Promise<Conversation> {
+  async createConversation(
+    insertConversation: InsertConversation,
+  ): Promise<Conversation> {
     const id = randomUUID();
     const now = new Date();
-    const conversation: Conversation = { 
+    const conversation: Conversation = {
       ...insertConversation,
-      id, 
-      createdAt: now, 
+      id,
+      createdAt: now,
       updatedAt: now,
-      status: insertConversation.status || 'active',
+      status: insertConversation.status || "active",
       userId: insertConversation.userId || null,
       userName: insertConversation.userName || null,
-      lastMessage: insertConversation.lastMessage || null
+      lastMessage: insertConversation.lastMessage || null,
     };
     this.conversations.set(id, conversation);
     return conversation;
   }
 
-  async updateConversation(id: string, updates: Partial<Conversation>): Promise<Conversation | undefined> {
+  async updateConversation(
+    id: string,
+    updates: Partial<Conversation>,
+  ): Promise<Conversation | undefined> {
     const conversation = this.conversations.get(id);
     if (!conversation) return undefined;
-    
+
     const updated = { ...conversation, ...updates, updatedAt: new Date() };
     this.conversations.set(id, updated);
     return updated;
   }
 
   async getLeads(): Promise<Lead[]> {
-    return Array.from(this.leads.values()).sort((a, b) => 
-      new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+    return Array.from(this.leads.values()).sort(
+      (a, b) =>
+        new Date(b.createdAt || 0).getTime() -
+        new Date(a.createdAt || 0).getTime(),
     );
   }
 
@@ -153,24 +275,27 @@ export class MemStorage implements IStorage {
 
   async createLead(insertLead: InsertLead): Promise<Lead> {
     const id = randomUUID();
-    const lead: Lead = { 
-      ...insertLead, 
-      id, 
+    const lead: Lead = {
+      ...insertLead,
+      id,
       createdAt: new Date(),
-      status: insertLead.status || 'NEW',
+      status: insertLead.status || "NEW",
       name: insertLead.name || null,
       phone: insertLead.phone || null,
       sum: insertLead.sum || null,
-      items: insertLead.items || []
+      items: insertLead.items || [],
     };
     this.leads.set(id, lead);
     return lead;
   }
 
-  async updateLead(id: string, updates: Partial<Lead>): Promise<Lead | undefined> {
+  async updateLead(
+    id: string,
+    updates: Partial<Lead>,
+  ): Promise<Lead | undefined> {
     const lead = this.leads.get(id);
     if (!lead) return undefined;
-    
+
     const updated = { ...lead, ...updates };
     this.leads.set(id, updated);
     return updated;
@@ -185,18 +310,18 @@ export class MemStorage implements IStorage {
   }
 
   async getProductBySku(sku: string): Promise<Product | undefined> {
-    return Array.from(this.products.values()).find(p => p.sku === sku);
+    return Array.from(this.products.values()).find((p) => p.sku === sku);
   }
 
   async createProduct(insertProduct: InsertProduct): Promise<Product> {
     const id = randomUUID();
-    const product: Product = { 
-      ...insertProduct, 
+    const product: Product = {
+      ...insertProduct,
       id,
       inStock: insertProduct.inStock ?? true,
       category: insertProduct.category || null,
       currency: insertProduct.currency || null,
-      photoUrl: insertProduct.photoUrl || null
+      photoUrl: insertProduct.photoUrl || null,
     };
     this.products.set(id, product);
     return product;
@@ -204,21 +329,24 @@ export class MemStorage implements IStorage {
 
   async searchProducts(query: string): Promise<Product[]> {
     const lowercaseQuery = query.toLowerCase();
-    return Array.from(this.products.values()).filter(product =>
-      product.name.toLowerCase().includes(lowercaseQuery) ||
-      product.category?.toLowerCase().includes(lowercaseQuery) ||
-      product.sku.toLowerCase().includes(lowercaseQuery)
+    return Array.from(this.products.values()).filter(
+      (product) =>
+        product.name.toLowerCase().includes(lowercaseQuery) ||
+        product.category?.toLowerCase().includes(lowercaseQuery) ||
+        product.sku.toLowerCase().includes(lowercaseQuery),
     );
   }
 
   async getBotCommands(): Promise<BotCommand[]> {
-    return Array.from(this.botCommands.values()).sort((a, b) => (b.count || 0) - (a.count || 0));
+    return Array.from(this.botCommands.values()).sort(
+      (a, b) => (b.count || 0) - (a.count || 0),
+    );
   }
 
   async incrementCommandUsage(command: string, channel: string): Promise<void> {
     const key = `${command}-${channel}`;
     const existing = this.botCommands.get(key);
-    
+
     if (existing) {
       existing.count = (existing.count || 0) + 1;
       existing.lastUsed = new Date();
@@ -228,7 +356,7 @@ export class MemStorage implements IStorage {
         command,
         channel,
         count: 1,
-        lastUsed: new Date()
+        lastUsed: new Date(),
       };
       this.botCommands.set(key, newCommand);
     }
@@ -238,7 +366,11 @@ export class MemStorage implements IStorage {
     return Array.from(this.systemStatus.values());
   }
 
-  async updateSystemStatus(serviceName: string, status: string, description?: string): Promise<void> {
+  async updateSystemStatus(
+    serviceName: string,
+    status: string,
+    description?: string,
+  ): Promise<void> {
     const existing = this.systemStatus.get(serviceName);
     if (existing) {
       existing.status = status;
@@ -250,7 +382,7 @@ export class MemStorage implements IStorage {
         serviceName,
         status,
         description: description || null,
-        lastCheck: new Date()
+        lastCheck: new Date(),
       };
       this.systemStatus.set(serviceName, newStatus);
     }

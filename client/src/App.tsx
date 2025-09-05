@@ -13,6 +13,7 @@ import Analytics from "@/pages/analytics";
 import Settings from "@/pages/settings";
 import TestPage from "@/pages/test";
 import NotFound from "@/pages/not-found";
+import AiConfigPage from "@/pages/ai-config";
 
 function Router() {
   return (
@@ -27,6 +28,7 @@ function Router() {
         <Route path="/analytics" component={Analytics} />
         <Route path="/settings" component={Settings} />
         <Route path="/test" component={TestPage} />
+        <Route path="/ai-config" component={AiConfigPage} />
         <Route component={NotFound} />
       </Switch>
     </div>

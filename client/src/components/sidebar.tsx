@@ -1,4 +1,15 @@
-import { Bot, LayoutDashboard, MessageCircle, Users, Package, QrCode, BarChart3, Settings, User, TestTube } from "lucide-react";
+import {
+  Bot,
+  LayoutDashboard,
+  MessageCircle,
+  Users,
+  Package,
+  QrCode,
+  BarChart3,
+  Settings,
+  User,
+  TestTube,
+} from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +20,7 @@ const navigation = [
   { name: "Catalog", href: "/catalog", icon: Package },
   { name: "Payments", href: "/payments", icon: QrCode },
   { name: "Analytics", href: "/analytics", icon: BarChart3 },
+  { name: "ИИ Конфигурация", href: "/ai-config", icon: Bot },
   { name: "Settings", href: "/settings", icon: Settings },
   { name: "Test", href: "/test", icon: TestTube },
 ];
@@ -25,7 +37,9 @@ export function Sidebar() {
               <Bot className="w-6 h-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-foreground">DocuGenius</h1>
+              <h1 className="text-lg font-semibold text-foreground">
+                DocuGenius
+              </h1>
               <p className="text-sm text-muted-foreground">AI Bot Management</p>
             </div>
           </div>
@@ -35,7 +49,7 @@ export function Sidebar() {
           {navigation.map((item) => {
             const Icon = item.icon;
             const isActive = location === item.href;
-            
+
             return (
               <Link
                 key={item.name}
@@ -44,7 +58,7 @@ export function Sidebar() {
                   "flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors",
                   isActive
                     ? "bg-primary text-primary-foreground"
-                    : "text-foreground hover:bg-accent hover:text-accent-foreground"
+                    : "text-foreground hover:bg-accent hover:text-accent-foreground",
                 )}
                 data-testid={`nav-${item.name.toLowerCase()}`}
               >
@@ -61,8 +75,12 @@ export function Sidebar() {
               <User className="w-4 h-4" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">Admin User</p>
-              <p className="text-xs text-muted-foreground truncate">admin@example.com</p>
+              <p className="text-sm font-medium text-foreground truncate">
+                Admin User
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                admin@example.com
+              </p>
             </div>
           </div>
         </div>

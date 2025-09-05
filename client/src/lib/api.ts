@@ -1,4 +1,4 @@
-import { apiRequest } from './queryClient';
+import { apiRequest } from "./queryClient";
 
 export interface DashboardStats {
   activeConversations: number;
@@ -60,26 +60,63 @@ export interface Product {
 
 export const api = {
   getDashboardStats: (): Promise<DashboardStats> =>
-    apiRequest('GET', '/api/dashboard/stats').then(res => res.json()),
-  
+    apiRequest("GET", "/api/dashboard/stats").then((res) => res.json()),
+
   getConversations: (): Promise<Conversation[]> =>
-    apiRequest('GET', '/api/conversations').then(res => res.json()),
-  
+    apiRequest("GET", "/api/conversations").then((res) => res.json()),
+
   getLeads: (): Promise<Lead[]> =>
-    apiRequest('GET', '/api/leads').then(res => res.json()),
-  
+    apiRequest("GET", "/api/leads").then((res) => res.json()),
+
   getCommands: (): Promise<BotCommand[]> =>
-    apiRequest('GET', '/api/commands').then(res => res.json()),
-  
+    apiRequest("GET", "/api/commands").then((res) => res.json()),
+
   getSystemStatus: (): Promise<SystemStatus[]> =>
-    apiRequest('GET', '/api/system-status').then(res => res.json()),
-  
+    apiRequest("GET", "/api/system-status").then((res) => res.json()),
+
   getProducts: (): Promise<Product[]> =>
-    apiRequest('GET', '/api/products').then(res => res.json()),
-  
+    apiRequest("GET", "/api/products").then((res) => res.json()),
+
   searchProducts: (query: string): Promise<Product[]> =>
-    apiRequest('GET', `/api/products/search?q=${encodeURIComponent(query)}`).then(res => res.json()),
-  
-  createLead: (data: { channel: string; name: string; phone: string; items: any[]; sum: number }) =>
-    apiRequest('POST', '/api/leads', data)
+    apiRequest(
+      "GET",
+      `/api/products/search?q=${encodeURIComponent(query)}`,
+    ).then((res) => res.json()),
+
+  createLead: (data: {
+    channel: string;
+    name: string;
+    phone: string;
+    items: any[];
+    sum: number;
+  }) => apiRequest("POST", "/api/leads", data),
 };
+
+export interface IndustryConfig {
+  id: string;
+  key: "dentistry" | "restaurant" | "construction" | "legal";
+  title: string;
+  active: boolean;
+  usersCount: number;
+  systemPrompt: string;
+}
+
+export interface IndustryStats {
+  configured: number;
+  active: number;
+  totalUsers: number;
+}
+
+export const aiApi = {
+  getIndustries: (): Promise<{
+    items: IndustryConfig[];
+    stats: IndustryStats;
+  }> => apiRequest("GET", "/api/ai/industries").then((r) => r.json()),
+  createIndustry: (payload: Partial<IndustryConfig>) =>
+    apiRequest("POST", "/api/ai/industries", payload).then((r) => r.json()),
+  updateIndustry: (id: string, payload: Partial<IndustryConfig>) =>
+    apiRequest("PATCH", `/api/ai/industries/${id}`, payload).then((r) =>
+      r.json(),
+    ),
+};
+

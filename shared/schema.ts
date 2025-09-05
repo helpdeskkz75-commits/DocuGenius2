@@ -1,16 +1,28 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, integer, jsonb, boolean } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  varchar,
+  timestamp,
+  integer,
+  jsonb,
+  boolean,
+} from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   username: text("username").notNull().unique(),
   password: text("password").notNull(),
 });
 
 export const conversations = pgTable("conversations", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   chatId: text("chat_id").notNull(),
   channel: text("channel").notNull(), // 'telegram' | 'whatsapp'
   userId: text("user_id"),
@@ -22,7 +34,9 @@ export const conversations = pgTable("conversations", {
 });
 
 export const leads = pgTable("leads", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   leadId: text("lead_id").notNull().unique(),
   channel: text("channel").notNull(),
   name: text("name"),
@@ -34,7 +48,9 @@ export const leads = pgTable("leads", {
 });
 
 export const products = pgTable("products", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   sku: text("sku").notNull().unique(),
   name: text("name").notNull(),
   category: text("category"),
@@ -45,7 +61,9 @@ export const products = pgTable("products", {
 });
 
 export const botCommands = pgTable("bot_commands", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   command: text("command").notNull(),
   channel: text("channel").notNull(),
   count: integer("count").default(1),
@@ -53,7 +71,9 @@ export const botCommands = pgTable("bot_commands", {
 });
 
 export const systemStatus = pgTable("system_status", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  id: varchar("id")
+    .primaryKey()
+    .default(sql`gen_random_uuid()`),
   serviceName: text("service_name").notNull().unique(),
   status: text("status").notNull(), // 'online' | 'offline' | 'error'
   lastCheck: timestamp("last_check").defaultNow(),
@@ -102,3 +122,24 @@ export type BotCommand = typeof botCommands.$inferSelect;
 export type InsertBotCommand = z.infer<typeof insertBotCommandSchema>;
 export type SystemStatus = typeof systemStatus.$inferSelect;
 export type InsertSystemStatus = z.infer<typeof insertSystemStatusSchema>;
+
+// --- AI Industry Configs ---
+export const industryKeys = [
+  "dentistry",
+  "restaurant",
+  "construction",
+  "legal",
+] as const;
+
+export type IndustryKey = (typeof industryKeys)[number];
+
+export interface IndustryConfig {
+  id: string;
+  key: IndustryKey; // системный ключ
+  title: string; // Человекочитаемое название (Стоматология и т.п.)
+  active: boolean; // Активна/выключена
+  usersCount: number; // Кол-во пользователей (метрика в карточке)
+  systemPrompt: string; // Системный промпт для этой отрасли
+}
+
+export type InsertIndustryConfig = Omit<IndustryConfig, "id">;

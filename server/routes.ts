@@ -2,7 +2,11 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { getWAClient } from "./integrations/whatsapp/factory";
-import { getPriceBySku, searchProducts, appendRow } from "./integrations/google/sheets";
+import {
+  getPriceBySku,
+  searchProducts,
+  appendRow,
+} from "./integrations/google/sheets";
 import { generateQrPngBuffer } from "./services/qr";
 import { telegramBotService } from "./services/telegramBot";
 import { funnelService } from "./services/funnel";
@@ -12,30 +16,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize Telegram bot
   await telegramBotService.initialize();
 
+  // ---------- AI Industry Configs ----------
+  app.get("/api/ai/industries", async (_req, res) => {
+    const items = await storage.getIndustryConfigs();
+    // простые метрики для шапки
+    const configured = items.filter((i) => i.systemPrompt?.trim()).length;
+    const active = items.filter((i) => i.active).length;
+    const totalUsers = items.reduce((a, i) => a + (i.usersCount || 0), 0);
+    res.json({ items, stats: { configured, active, totalUsers } });
+  });
+
+  app.post("/api/ai/industries", async (req, res) => {
+    const body = req.body as {
+      key: string;
+      title: string;
+      active?: boolean;
+      usersCount?: number;
+      systemPrompt?: string;
+    };
+    if (!body?.key || !body?.title)
+      return res.status(400).json({ error: "key and title required" });
+    const created = await storage.createIndustryConfig({
+      key: body.key as any,
+      title: body.title,
+      active: !!body.active,
+      usersCount: body.usersCount ?? 0,
+      systemPrompt: body.systemPrompt ?? "",
+    });
+    res.json(created);
+  });
+
+  app.patch("/api/ai/industries/:id", async (req, res) => {
+    const updated = await storage.updateIndustryConfig(
+      req.params.id,
+      req.body || {},
+    );
+    if (!updated) return res.status(404).json({ error: "Not found" });
+    res.json(updated);
+  });
+
   // Dashboard API endpoints
   app.get("/api/dashboard/stats", async (req, res) => {
     try {
       const conversations = await storage.getConversations();
       const leads = await storage.getLeads();
       const commands = await storage.getBotCommands();
-      
-      const activeConversations = conversations.filter(c => c.status === 'active').length;
-      const newLeads = leads.filter(l => {
+
+      const activeConversations = conversations.filter(
+        (c) => c.status === "active",
+      ).length;
+      const newLeads = leads.filter((l) => {
         const today = new Date();
         const leadDate = new Date(l.createdAt || 0);
         return leadDate.toDateString() === today.toDateString();
       }).length;
-      const ordersToday = leads.filter(l => {
+      const ordersToday = leads.filter((l) => {
         const today = new Date();
         const leadDate = new Date(l.createdAt || 0);
-        return leadDate.toDateString() === today.toDateString() && l.status === 'PAID';
+        return (
+          leadDate.toDateString() === today.toDateString() &&
+          l.status === "PAID"
+        );
       }).length;
 
       res.json({
         activeConversations,
         newLeads,
         ordersToday,
-        responseRate: 94.2
+        responseRate: 94.2,
       });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
@@ -105,7 +153,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const sheetId = process.env.PRICES_SHEET_ID as string;
       const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
-      if (!sheetId) return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
+      if (!sheetId)
+        return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
       const item = await getPriceBySku(sheetId, range, req.params.sku);
       if (!item) return res.status(404).json({ error: "SKU not found" });
       res.json(item);
@@ -119,7 +168,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const q = String(req.query.q || "");
       const sheetId = process.env.PRICES_SHEET_ID as string;
       const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
-      if (!sheetId) return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
+      if (!sheetId)
+        return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
       const items = await searchProducts(sheetId, range, q);
       res.json(items);
     } catch (e: any) {
@@ -134,23 +184,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const leadsSheetId = process.env.LEADS_SHEET_ID;
       const leadsRange = process.env.LEADS_RANGE || "Sheet1!A:Z";
       if (leadsSheetId) {
-        await appendRow(
-          leadsSheetId, leadsRange,
-          [leadId, channel || 'web', name || '', phone || '', JSON.stringify(items||[]), sum || 0, "NEW", new Date().toISOString()]
-        );
+        await appendRow(leadsSheetId, leadsRange, [
+          leadId,
+          channel || "web",
+          name || "",
+          phone || "",
+          JSON.stringify(items || []),
+          sum || 0,
+          "NEW",
+          new Date().toISOString(),
+        ]);
       }
-      
+
       // Store in memory as well
       await storage.createLead({
         leadId,
-        channel: channel || 'web',
-        name: name || '',
-        phone: phone || '',
+        channel: channel || "web",
+        name: name || "",
+        phone: phone || "",
         items: items || [],
         sum: sum || 0,
-        status: 'NEW'
+        status: "NEW",
       });
-      
+
       const qr = await generateQrPngBuffer(`pay://${leadId}`);
       res.setHeader("Content-Type", "image/png");
       res.send(qr);
@@ -161,7 +217,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/payments/qr/callback", async (req, res) => {
     const sig = req.header("x-signature");
-    if (!sig || sig !== process.env.PAYMENT_CALLBACK_SECRET) return res.status(403).json({ error: "bad signature" });
+    if (!sig || sig !== process.env.PAYMENT_CALLBACK_SECRET)
+      return res.status(403).json({ error: "bad signature" });
     // TODO: mark lead as PAID in Google Sheets by LeadID
     res.json({ ok: true });
   });
@@ -173,10 +230,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const msg = (body.messages && body.messages[0]) || null;
       if (!msg) return res.json({ ok: true });
       const from = msg.from || (msg.sender && msg.sender.id);
-      let text = '';
+      let text = "";
       if (msg.text && msg.text.body) text = msg.text.body;
       else if (msg.button && msg.button.text) text = msg.button.text;
-      else if (msg.interactive && msg.interactive.button_reply && msg.interactive.button_reply.title) text = msg.interactive.button_reply.title;
+      else if (
+        msg.interactive &&
+        msg.interactive.button_reply &&
+        msg.interactive.button_reply.title
+      )
+        text = msg.interactive.button_reply.title;
       if (!from) return res.json({ ok: true });
 
       const wa = getWAClient();
@@ -184,78 +246,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Store/update conversation
       await storage.createConversation({
         chatId: from,
-        channel: 'whatsapp',
+        channel: "whatsapp",
         userId: from,
-        userName: '',
+        userName: "",
         lastMessage: text,
-        status: 'active'
+        status: "active",
       });
 
       // Commands
-      const lower = String(text || '').trim().toLowerCase();
+      const lower = String(text || "")
+        .trim()
+        .toLowerCase();
       const sheetId = process.env.PRICES_SHEET_ID as string;
-      const range = process.env.PRICES_RANGE || 'Sheet1!A:Z';
+      const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
 
-      if (lower.startsWith('/price')) {
-        const parts = lower.split(' ').filter(Boolean);
+      if (lower.startsWith("/price")) {
+        const parts = lower.split(" ").filter(Boolean);
         const sku = parts[1];
         if (!sku) {
-          await wa.sendText(from, 'Укажите SKU: /price <sku>');
+          await wa.sendText(from, "Укажите SKU: /price <sku>");
         } else {
           const item = await getPriceBySku(sheetId, range, sku);
-          if (!item) await wa.sendText(from, 'Не нашел такой SKU');
-          else await wa.sendText(from, `${item.Name} — ${item.Price} ${item.Currency || ''} (SKU ${item.SKU})`);
+          if (!item) await wa.sendText(from, "Не нашел такой SKU");
+          else
+            await wa.sendText(
+              from,
+              `${item.Name} — ${item.Price} ${item.Currency || ""} (SKU ${item.SKU})`,
+            );
         }
-        await storage.incrementCommandUsage('/price', 'whatsapp');
+        await storage.incrementCommandUsage("/price", "whatsapp");
         return res.json({ ok: true });
       }
 
-      if (lower.startsWith('/find')) {
-        const q = lower.replace('/find', '').trim();
+      if (lower.startsWith("/find")) {
+        const q = lower.replace("/find", "").trim();
         const items = await searchProducts(sheetId, range, q);
-        if (!items.length) await wa.sendText(from, 'Ничего не найдено');
+        if (!items.length) await wa.sendText(from, "Ничего не найдено");
         else {
-          const top = items.slice(0,5).map(i => `• ${i.Name} — ${i.Price} ${i.Currency || ''} (SKU ${i.SKU})`).join('\n');
+          const top = items
+            .slice(0, 5)
+            .map(
+              (i) =>
+                `• ${i.Name} — ${i.Price} ${i.Currency || ""} (SKU ${i.SKU})`,
+            )
+            .join("\n");
           await wa.sendText(from, top);
         }
-        await storage.incrementCommandUsage('/find', 'whatsapp');
+        await storage.incrementCommandUsage("/find", "whatsapp");
         return res.json({ ok: true });
       }
 
-      if (lower.startsWith('/order')) {
+      if (lower.startsWith("/order")) {
         const leadsSheetId = process.env.LEADS_SHEET_ID;
-        const leadsRange = process.env.LEADS_RANGE || 'Sheet1!A:Z';
-        const leadId = 'ld_' + Date.now();
+        const leadsRange = process.env.LEADS_RANGE || "Sheet1!A:Z";
+        const leadId = "ld_" + Date.now();
         if (leadsSheetId) {
-          await appendRow(leadsSheetId, leadsRange, [leadId, 'wa', from, '', '[]', 0, 'NEW', new Date().toISOString()]);
+          await appendRow(leadsSheetId, leadsRange, [
+            leadId,
+            "wa",
+            from,
+            "",
+            "[]",
+            0,
+            "NEW",
+            new Date().toISOString(),
+          ]);
         }
         await storage.createLead({
           leadId,
-          channel: 'whatsapp',
+          channel: "whatsapp",
           name: from,
-          phone: '',
+          phone: "",
           items: [],
           sum: 0,
-          status: 'NEW'
+          status: "NEW",
         });
-        await wa.sendText(from, 'Заявка создана. Мы пришлём ссылку/QR для оплаты.');
-        await storage.incrementCommandUsage('/order', 'whatsapp');
+        await wa.sendText(
+          from,
+          "Заявка создана. Мы пришлём ссылку/QR для оплаты.",
+        );
+        await storage.incrementCommandUsage("/order", "whatsapp");
         return res.json({ ok: true });
       }
 
       // 2GIS and callback keywords
-      if (lower.includes('2gis') || lower.includes('навигац')) {
-        const url = process.env.TWO_GIS_URL || 'https://2gis.kz';
+      if (lower.includes("2gis") || lower.includes("навигац")) {
+        const url = process.env.TWO_GIS_URL || "https://2gis.kz";
         await wa.sendText(from, url);
         return res.json({ ok: true });
       }
-      if (lower.includes('перезвон')) {
-        const cbSheetId = process.env.CALLBACKS_SHEET_ID || process.env.LEADS_SHEET_ID;
-        const cbRange = process.env.CALLBACKS_RANGE || process.env.LEADS_RANGE || 'Sheet1!A:Z';
+      if (lower.includes("перезвон")) {
+        const cbSheetId =
+          process.env.CALLBACKS_SHEET_ID || process.env.LEADS_SHEET_ID;
+        const cbRange =
+          process.env.CALLBACKS_RANGE ||
+          process.env.LEADS_RANGE ||
+          "Sheet1!A:Z";
         if (cbSheetId) {
-          await appendRow(cbSheetId, cbRange, ['cb_' + Date.now(), 'wa', from, '', 'CALLBACK', new Date().toISOString()]);
+          await appendRow(cbSheetId, cbRange, [
+            "cb_" + Date.now(),
+            "wa",
+            from,
+            "",
+            "CALLBACK",
+            new Date().toISOString(),
+          ]);
         }
-        await wa.sendText(from, 'Принято. Менеджер перезвонит.');
+        await wa.sendText(from, "Принято. Менеджер перезвонит.");
         return res.json({ ok: true });
       }
 
@@ -281,7 +378,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       return res.json({ ok: true });
     } catch (e: any) {
-      console.error('WA webhook error', e);
+      console.error("WA webhook error", e);
       return res.status(200).json({ ok: true }); // don't retry storms on provider
     }
   });
@@ -290,14 +387,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/ai/settings", async (req, res) => {
     try {
       const settings = {
-        industry: process.env.AI_INDUSTRY || 'retail',
-        personality: process.env.AI_PERSONALITY || 'professional',
-        temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
-        maxTokens: parseInt(process.env.AI_MAX_TOKENS || '1000'),
-        contextMemory: process.env.AI_CONTEXT_MEMORY !== 'false',
-        smartRecommendations: process.env.AI_SMART_RECOMMENDATIONS !== 'false',
-        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-        apiKeySet: !!process.env.OPENAI_API_KEY
+        industry: process.env.AI_INDUSTRY || "retail",
+        personality: process.env.AI_PERSONALITY || "professional",
+        temperature: parseFloat(process.env.AI_TEMPERATURE || "0.7"),
+        maxTokens: parseInt(process.env.AI_MAX_TOKENS || "1000"),
+        contextMemory: process.env.AI_CONTEXT_MEMORY !== "false",
+        smartRecommendations: process.env.AI_SMART_RECOMMENDATIONS !== "false",
+        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        apiKeySet: !!process.env.OPENAI_API_KEY,
       };
       res.json(settings);
     } catch (error: any) {
@@ -310,42 +407,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { query } = req.body;
       if (!query) {
-        return res.status(400).json({ error: 'Query is required' });
+        return res.status(400).json({ error: "Query is required" });
       }
 
       // Get products from Google Sheets
       const sheetId = process.env.PRICES_SHEET_ID as string;
-      const range = process.env.PRICES_RANGE || 'Sheet1!A:Z';
-      
+      const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
+
       if (!sheetId) {
-        return res.status(500).json({ error: 'Product catalog not configured' });
+        return res
+          .status(500)
+          .json({ error: "Product catalog not configured" });
       }
 
       const products = await searchProducts(sheetId, range, query);
-      
+
       if (products.length === 0) {
-        return res.json({ 
-          recommendations: 'К сожалению, по вашему запросу ничего не найдено. Попробуйте уточнить запрос или свяжитесь с нашим менеджером.' 
+        return res.json({
+          recommendations:
+            "К сожалению, по вашему запросу ничего не найдено. Попробуйте уточнить запрос или свяжитесь с нашим менеджером.",
         });
       }
 
       // Generate AI recommendations
-      const { generateProductRecommendations } = await import('./services/openai');
+      const { generateProductRecommendations } = await import(
+        "./services/openai"
+      );
       const recommendations = await generateProductRecommendations(
-        query, 
+        query,
         products,
         {
           industry: process.env.AI_INDUSTRY,
           personality: process.env.AI_PERSONALITY,
-          temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
-          maxTokens: parseInt(process.env.AI_MAX_TOKENS || '500')
-        }
+          temperature: parseFloat(process.env.AI_TEMPERATURE || "0.7"),
+          maxTokens: parseInt(process.env.AI_MAX_TOKENS || "500"),
+        },
       );
 
       res.json({ recommendations, products: products.slice(0, 5) });
     } catch (error: any) {
-      console.error('AI recommendations error:', error);
-      res.status(500).json({ error: 'Failed to generate recommendations' });
+      console.error("AI recommendations error:", error);
+      res.status(500).json({ error: "Failed to generate recommendations" });
     }
   });
 
