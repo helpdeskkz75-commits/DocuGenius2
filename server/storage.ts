@@ -159,7 +159,6 @@ export class MemStorage implements IStorage {
           const id = randomUUID();
           this.industryConfigs.set(id, { id, ...s });
         });
-      }
     
     // Initialize with some system status entries
     this.initializeSystemStatus();
