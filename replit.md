@@ -33,11 +33,15 @@ Preferred communication style: Simple, everyday language.
 - **Migration**: Drizzle Kit for schema migrations
 
 ### AI and Bot Features
-- **Multi-channel Support**: Telegram and WhatsApp integration
-- **Language Detection**: Automatic Kazakh/Russian language detection
-- **Conversational Funnel**: 3-step lead qualification process
-- **Product Search**: Integration with Google Sheets for product catalog
-- **Lead Management**: Automated lead capture and tracking
+- **Multi-channel Support**: Telegram and WhatsApp integration with unified bot logic
+- **OpenAI Integration**: GPT-powered conversational AI with industry-specific prompts
+- **Language Detection**: Automatic Kazakh/Russian language detection and response
+- **Conversational Funnel**: 3-step lead qualification process with AI fallback
+- **Industry Adaptation**: AI personality and responses tailored to 12+ business sectors
+- **Smart Recommendations**: AI-powered product suggestions based on user queries
+- **Context Memory**: Conversation history tracking for personalized interactions
+- **Product Search**: Integration with Google Sheets for real-time catalog access
+- **Lead Management**: Automated lead capture, tracking, and Google Sheets sync
 - **QR Code Generation**: Payment QR code generation capability
 
 ### Authentication and Authorization
@@ -48,12 +52,14 @@ Preferred communication style: Simple, everyday language.
 ## External Dependencies
 
 ### Third-party Services
+- **OpenAI API**: GPT-4 and GPT-3.5 models for conversational AI and smart recommendations
 - **Google Sheets API**: Product catalog management and lead storage via googleapis
 - **Telegram Bot API**: Bot interactions through node-telegram-bot-api
 - **WhatsApp Integration**: 360dialog API for WhatsApp messaging
 - **Neon Database**: PostgreSQL hosting via @neondatabase/serverless
 
 ### Key Libraries
+- **AI Integration**: OpenAI SDK for GPT model access and conversation management
 - **UI Framework**: React with @radix-ui components
 - **State Management**: @tanstack/react-query for API state
 - **Database**: drizzle-orm with PostgreSQL driver
@@ -64,6 +70,8 @@ Preferred communication style: Simple, everyday language.
 
 ### Environment Configuration
 - Database connection via DATABASE_URL
-- Telegram bot token and operator group configuration
+- OpenAI API key and model configuration for AI features
+- Telegram bot token and operator group configuration  
 - Google Sheets API credentials and sheet IDs
 - WhatsApp API configuration for 360dialog provider
+- AI personality and industry settings for contextual responses

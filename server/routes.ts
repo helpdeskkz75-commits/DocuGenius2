@@ -259,18 +259,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ ok: true });
       }
 
-      // Funnel fallback (shared orchestrator)
+      // AI-powered responses with funnel fallback
       if (!funnelService.has(from)) {
         const first = funnelService.start(from, detectLang(text) as any);
         await wa.sendText(from, first);
       } else {
-        const reply = funnelService.next(from, text);
-        if (reply) await wa.sendText(from, reply);
+        // Try AI response if available, fallback to basic funnel
+        try {
+          const aiResponse = await funnelService.generateAIResponse(from, text);
+          if (aiResponse) {
+            await wa.sendText(from, aiResponse);
+          } else {
+            const reply = funnelService.next(from, text);
+            if (reply) await wa.sendText(from, reply);
+          }
+        } catch (error) {
+          // Fallback to basic funnel
+          const reply = funnelService.next(from, text);
+          if (reply) await wa.sendText(from, reply);
+        }
       }
       return res.json({ ok: true });
     } catch (e: any) {
       console.error('WA webhook error', e);
       return res.status(200).json({ ok: true }); // don't retry storms on provider
+    }
+  });
+
+  // AI Settings API
+  app.get("/api/ai/settings", async (req, res) => {
+    try {
+      const settings = {
+        industry: process.env.AI_INDUSTRY || 'retail',
+        personality: process.env.AI_PERSONALITY || 'professional',
+        temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+        maxTokens: parseInt(process.env.AI_MAX_TOKENS || '1000'),
+        contextMemory: process.env.AI_CONTEXT_MEMORY !== 'false',
+        smartRecommendations: process.env.AI_SMART_RECOMMENDATIONS !== 'false',
+        model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+        apiKeySet: !!process.env.OPENAI_API_KEY
+      };
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // AI Product Recommendations
+  app.post("/api/ai/recommendations", async (req, res) => {
+    try {
+      const { query } = req.body;
+      if (!query) {
+        return res.status(400).json({ error: 'Query is required' });
+      }
+
+      // Get products from Google Sheets
+      const sheetId = process.env.PRICES_SHEET_ID as string;
+      const range = process.env.PRICES_RANGE || 'Sheet1!A:Z';
+      
+      if (!sheetId) {
+        return res.status(500).json({ error: 'Product catalog not configured' });
+      }
+
+      const products = await searchProducts(sheetId, range, query);
+      
+      if (products.length === 0) {
+        return res.json({ 
+          recommendations: 'К сожалению, по вашему запросу ничего не найдено. Попробуйте уточнить запрос или свяжитесь с нашим менеджером.' 
+        });
+      }
+
+      // Generate AI recommendations
+      const { generateProductRecommendations } = await import('./services/openai');
+      const recommendations = await generateProductRecommendations(
+        query, 
+        products,
+        {
+          industry: process.env.AI_INDUSTRY,
+          personality: process.env.AI_PERSONALITY,
+          temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+          maxTokens: parseInt(process.env.AI_MAX_TOKENS || '500')
+        }
+      );
+
+      res.json({ recommendations, products: products.slice(0, 5) });
+    } catch (error: any) {
+      console.error('AI recommendations error:', error);
+      res.status(500).json({ error: 'Failed to generate recommendations' });
     }
   });
 

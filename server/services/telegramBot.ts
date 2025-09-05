@@ -181,8 +181,20 @@ class TelegramBotService {
         const first = funnelService.start(chatId, lang as any);
         await this.bot!.sendMessage(chatId, first);
       } else {
-        const reply = funnelService.next(chatId, t);
-        if (reply) await this.bot!.sendMessage(chatId, reply);
+        // Try AI response if available, fallback to basic funnel
+        try {
+          const aiResponse = await funnelService.generateAIResponse(chatId, t);
+          if (aiResponse) {
+            await this.bot!.sendMessage(chatId, aiResponse);
+          } else {
+            const reply = funnelService.next(chatId, t);
+            if (reply) await this.bot!.sendMessage(chatId, reply);
+          }
+        } catch (error) {
+          // Fallback to basic funnel
+          const reply = funnelService.next(chatId, t);
+          if (reply) await this.bot!.sendMessage(chatId, reply);
+        }
       }
     });
     // === End of AI Assist MVP commands ===

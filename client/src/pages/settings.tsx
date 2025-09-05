@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Bot, MessageSquare, Database, Bell, Shield, Key, Globe, Save } from "lucide-react";
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Bot, MessageSquare, Database, Bell, Shield, Key, Globe, Save, Brain, Zap, Sliders } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,11 +8,19 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Settings() {
   const { toast } = useToast();
   const [unsavedChanges, setUnsavedChanges] = useState(false);
+
+  // Load AI settings from API
+  const { data: aiSettings } = useQuery({
+    queryKey: ['/api/ai/settings'],
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
   
   // Bot Configuration
   const [telegramEnabled, setTelegramEnabled] = useState(true);
@@ -25,6 +34,8 @@ export default function Settings() {
   const [googleCredentials, setGoogleCredentials] = useState("****");
   const [sheetsId, setSheetsId] = useState("");
   const [leadsSheetId, setLeadsSheetId] = useState("");
+  const [openaiApiKey, setOpenaiApiKey] = useState("****");
+  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
 
   // Notification Settings
   const [emailNotifications, setEmailNotifications] = useState(true);
@@ -46,6 +57,27 @@ export default function Settings() {
   const [welcomeMessageKz, setWelcomeMessageKz] = useState(
     "Қош келдіңіз! Мен сізге қажетті тауарларды табуға және тапсырысты ресімдеуге көмектесемін."
   );
+
+  // AI Bot Industry Settings
+  const [selectedIndustry, setSelectedIndustry] = useState("retail");
+  const [aiPersonality, setAiPersonality] = useState("professional");
+  const [aiTemperature, setAiTemperature] = useState(0.7);
+  const [maxTokens, setMaxTokens] = useState(1000);
+  const [contextMemory, setContextMemory] = useState(true);
+  const [smartRecommendations, setSmartRecommendations] = useState(true);
+
+  // Sync AI settings from API
+  useEffect(() => {
+    if (aiSettings) {
+      setSelectedIndustry(aiSettings.industry || "retail");
+      setAiPersonality(aiSettings.personality || "professional");
+      setAiTemperature(aiSettings.temperature || 0.7);
+      setMaxTokens(aiSettings.maxTokens || 1000);
+      setContextMemory(aiSettings.contextMemory !== false);
+      setSmartRecommendations(aiSettings.smartRecommendations !== false);
+      setOpenaiModel(aiSettings.model || "gpt-4o-mini");
+    }
+  }, [aiSettings]);
 
   const handleSaveSettings = () => {
     // Here you would typically save to the backend
@@ -217,6 +249,49 @@ export default function Settings() {
 
               <div className="space-y-4">
                 <div className="space-y-2">
+                  <Label htmlFor="openai-api-key">OpenAI API Key</Label>
+                  <Input
+                    id="openai-api-key"
+                    type="password"
+                    value={openaiApiKey}
+                    onChange={(e) => handleInputChange(setOpenaiApiKey)(e.target.value)}
+                    placeholder="Enter OpenAI API key"
+                    data-testid="input-openai-api-key"
+                  />
+                  <div className="flex items-center space-x-2 text-xs">
+                    {aiSettings?.apiKeySet ? (
+                      <Badge variant="outline" className="text-green-600">
+                        ✓ API Key Configured
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="text-xs">
+                        ✗ API Key Required
+                      </Badge>
+                    )}
+                    <span className="text-muted-foreground">
+                      Required for AI-powered responses and recommendations
+                    </span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="openai-model">OpenAI Model</Label>
+                  <Select value={openaiModel} onValueChange={handleInputChange(setOpenaiModel)}>
+                    <SelectTrigger data-testid="select-openai-model">
+                      <SelectValue placeholder="Select AI model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="gpt-4o-mini">GPT-4o Mini (Fast & Cost-Effective)</SelectItem>
+                      <SelectItem value="gpt-4o">GPT-4o (Balanced)</SelectItem>
+                      <SelectItem value="gpt-4-turbo">GPT-4 Turbo (Advanced)</SelectItem>
+                      <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo (Basic)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
                   <Label htmlFor="sheets-id">Products Sheet ID</Label>
                   <Input
                     id="sheets-id"
@@ -303,6 +378,133 @@ export default function Settings() {
                   onChange={(e) => handleInputChange(setCurrency)(e.target.value)}
                   placeholder="KZT"
                   data-testid="input-currency"
+                />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* AI Assistant Settings */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <Brain className="w-5 h-5" />
+              <span>AI Assistant Configuration</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="industry-select">Business Industry</Label>
+                <Select value={selectedIndustry} onValueChange={handleInputChange(setSelectedIndustry)}>
+                  <SelectTrigger data-testid="select-industry">
+                    <SelectValue placeholder="Select your industry" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="retail">🛍️ Retail & E-commerce</SelectItem>
+                    <SelectItem value="construction">🏗️ Construction & Building Materials</SelectItem>
+                    <SelectItem value="automotive">🚗 Automotive & Parts</SelectItem>
+                    <SelectItem value="real-estate">🏠 Real Estate</SelectItem>
+                    <SelectItem value="food-service">🍕 Food & Restaurant</SelectItem>
+                    <SelectItem value="healthcare">⚕️ Healthcare & Medical</SelectItem>
+                    <SelectItem value="beauty">💄 Beauty & Cosmetics</SelectItem>
+                    <SelectItem value="tech">💻 Technology & Software</SelectItem>
+                    <SelectItem value="finance">💰 Financial Services</SelectItem>
+                    <SelectItem value="education">📚 Education & Training</SelectItem>
+                    <SelectItem value="travel">✈️ Travel & Tourism</SelectItem>
+                    <SelectItem value="fitness">💪 Fitness & Wellness</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  AI will adapt responses to your industry context
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="personality-select">AI Personality</Label>
+                <Select value={aiPersonality} onValueChange={handleInputChange(setAiPersonality)}>
+                  <SelectTrigger data-testid="select-personality">
+                    <SelectValue placeholder="Choose AI personality" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="professional">Professional & Business-focused</SelectItem>
+                    <SelectItem value="friendly">Friendly & Conversational</SelectItem>
+                    <SelectItem value="expert">Expert & Technical</SelectItem>
+                    <SelectItem value="casual">Casual & Approachable</SelectItem>
+                    <SelectItem value="enthusiastic">Enthusiastic & Energetic</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-3">
+                <Label>AI Creativity Level: {aiTemperature}</Label>
+                <Slider
+                  value={[aiTemperature]}
+                  onValueChange={([value]) => handleInputChange(setAiTemperature)(value)}
+                  max={1}
+                  min={0}
+                  step={0.1}
+                  className="w-full"
+                  data-testid="slider-temperature"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Conservative</span>
+                  <span>Balanced</span>
+                  <span>Creative</span>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <Label>Response Length: {maxTokens} tokens</Label>
+                <Slider
+                  value={[maxTokens]}
+                  onValueChange={([value]) => handleInputChange(setMaxTokens)(value)}
+                  max={2000}
+                  min={100}
+                  step={100}
+                  className="w-full"
+                  data-testid="slider-tokens"
+                />
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Brief</span>
+                  <span>Medium</span>
+                  <span>Detailed</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-base flex items-center space-x-2">
+                    <Zap className="w-4 h-4" />
+                    <span>Context Memory</span>
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    Remember conversation history
+                  </p>
+                </div>
+                <Switch
+                  checked={contextMemory}
+                  onCheckedChange={handleInputChange(setContextMemory)}
+                  data-testid="switch-context-memory"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-base flex items-center space-x-2">
+                    <Sliders className="w-4 h-4" />
+                    <span>Smart Recommendations</span>
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    AI suggests relevant products
+                  </p>
+                </div>
+                <Switch
+                  checked={smartRecommendations}
+                  onCheckedChange={handleInputChange(setSmartRecommendations)}
+                  data-testid="switch-smart-recommendations"
                 />
               </div>
             </div>

@@ -1,3 +1,5 @@
+import { generateAIResponse } from './openai';
+
 type Lang = 'ru' | 'kz';
 export type FunnelStep = 0 | 1 | 2 | 3;
 
@@ -5,6 +7,7 @@ export interface FunnelState {
   step: FunnelStep;
   lang: Lang;
   answers: Record<string, string>;
+  conversationHistory: Array<{role: 'user' | 'assistant', content: string}>;
 }
 
 const PROMPTS: Record<Lang, [string, string, string]> = {
@@ -29,7 +32,7 @@ export class FunnelService {
   sessions = new Map<any, FunnelState>();
 
   start(chatId: any, lang: Lang): string {
-    this.sessions.set(chatId, { step: 1, lang, answers: {} });
+    this.sessions.set(chatId, { step: 1, lang, answers: {}, conversationHistory: [] });
     return PROMPTS[lang][0];
   }
 
@@ -61,6 +64,44 @@ export class FunnelService {
 
   cancel(chatId: any) {
     this.sessions.delete(chatId);
+  }
+
+  async generateAIResponse(chatId: any, message: string): Promise<string> {
+    const session = this.sessions.get(chatId);
+    if (!session) return "";
+
+    try {
+      // Add user message to history
+      session.conversationHistory.push({ role: 'user', content: message });
+
+      // Get AI config from environment or defaults
+      const aiConfig = {
+        industry: process.env.AI_INDUSTRY || 'retail',
+        personality: process.env.AI_PERSONALITY || 'professional',
+        temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
+        maxTokens: parseInt(process.env.AI_MAX_TOKENS || '1000'),
+        contextMemory: process.env.AI_CONTEXT_MEMORY !== 'false'
+      };
+
+      const aiResponse = await generateAIResponse(message, session.conversationHistory, aiConfig);
+      
+      // Add AI response to history
+      session.conversationHistory.push({ role: 'assistant', content: aiResponse });
+
+      // Keep history manageable (last 20 messages)
+      if (session.conversationHistory.length > 20) {
+        session.conversationHistory = session.conversationHistory.slice(-20);
+      }
+
+      return aiResponse;
+    } catch (error: any) {
+      console.error('AI response error:', error);
+      // Fallback to basic response
+      if (session.lang === 'kz') {
+        return 'Кешіріңіз, қазір жауап бере алмаймын. Менеджермен байланысуға тырысыңыз.';
+      }
+      return 'Извините, не могу ответить сейчас. Попробуйте связаться с менеджером.';
+    }
   }
 }
 
