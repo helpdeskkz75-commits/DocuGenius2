@@ -471,17 +471,7 @@ async function startRequestCall(chatId: number, replyTo?: number) {
   waitingPhone.add(chatId);
   const m = await bot.sendMessage(
     chatId,
-    "Оставьте номер телефона. Можно нажать кнопку ниже 👇",
-    {
-      reply_to_message_id: replyTo,
-      reply_markup: {
-        keyboard: [
-          [{ text: "📱 Поделиться номером", request_contact: true as any }],
-        ],
-        resize_keyboard: true,
-        one_time_keyboard: true,
-      } as any,
-    },
+    "Оставьте номер телефона (пример: +7 777 123 45 67):"
   );
   lastPromptId.set(chatId, m.message_id);
 }
@@ -676,7 +666,7 @@ bot.on("message", async (msg: Message) => {
     await bot.sendMessage(
       chatId,
       `Спасибо! Менеджер свяжется с вами ${fmtDate(dt)}.`,
-      { reply_markup: { remove_keyboard: true } as any },
+
     );
     await notifyAdminCallback(chatId, rec.phone, fmtDate(dt), dt.toISOString());
     return;
@@ -910,7 +900,7 @@ bot.on("audio", async (msg) => {
       );
       return;
     }
-    await handleRecognizedTextMessage(bot, chatId, text);
+    await handleRecognizedText(chatId, text);
   } catch {
     await bot.sendMessage(chatId, "Ошибка обработки аудио.");
   }
@@ -931,7 +921,7 @@ bot.on("document", async (msg) => {
       );
       return;
     }
-    await handleRecognizedTextMessage(bot, chatId, text);
+    await handleRecognizedText(chatId, text);
   } catch {
     await bot.sendMessage(chatId, "Ошибка обработки аудио-документа.");
   }
@@ -974,7 +964,10 @@ async function handleRecognizedText(chatId: number, text: string) {
   }
 }
 
-// ======================== CALLBACKS ========================
+// ======================== PURE DIALOG INTERFACE ========================
+// Note: All callback_query handlers removed for pure dialog interface
+/*
+// Removed callback_query handler for pure dialog interface
 bot.on("callback_query", async (q) => {
   const chatId = q.message?.chat.id!;
   const data = q.data!;
@@ -1080,7 +1073,7 @@ bot.on("callback_query", async (q) => {
       await bot.sendMessage(
         chatId,
         `Спасибо! Менеджер свяжется с вами ${fmtDate(dt)}.`,
-        { reply_markup: { remove_keyboard: true } as any },
+  
       );
       await notifyAdminCallback(
         chatId,
@@ -1097,60 +1090,26 @@ bot.on("callback_query", async (q) => {
     } catch {}
   }
 });
+*/
 
 // ======================== SERVICE (для routes.ts) ========================
 let __started = false;
 
 async function initialize() {
-  if (!__started) {
-    await bot.startPolling();
-    __started = true;
-  }
+  // Note: Polling disabled for pure webhook-based architecture
+  console.log("[telegramBot] Initialized for webhook mode (polling disabled)");
+  __started = true;
 }
 
 async function start() { return initialize(); }
 
 async function stop() {
-  if (__started) {
-    await bot.stopPolling();
-    __started = false;
-  }
+  // Note: No polling to stop in webhook mode
+  console.log("[telegramBot] Stopped");
+  __started = false;
 }
 
-// Единая реакция на распознанный текст (вне initialize)
-const handleRecognizedTextMessage = async (
-  bot: any,
-  chatId: number,
-  text: string,
-) => {
-  const intent = parseQuery(text);
-
-  if (intent?.intent === "search") {
-    const results = await searchProductsCompat(intent.query || text);
-    if (!results.length) {
-      await bot.sendMessage(chatId, "Ничего не найдено.");
-      return;
-    }
-    for (const p of results.slice(0, 6)) {
-      await bot.sendMessage(chatId, productCardText(p), {
-        parse_mode: "HTML",
-      });
-    }
-    return;
-  }
-
-  // fallback: обычный поиск
-  const results = await searchProductsCompat(text);
-  if (!results.length) {
-    await bot.sendMessage(chatId, "Ничего не найдено.");
-    return;
-  }
-  for (const p of results.slice(0, 6)) {
-    await bot.sendMessage(chatId, productCardText(p), {
-      parse_mode: "HTML",
-    });
-  }
-};
+// Note: handleRecognizedTextMessage removed - functionality moved to handleRecognizedText
 export const telegramBotService = {
   initialize,
   start,
