@@ -3,6 +3,8 @@ import { RefreshCw, MessageCircle, UserPlus, ShoppingCart, Zap, Terminal, Search
 import { api, type DashboardStats, type Conversation, type BotCommand, type SystemStatus } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { PageHeader } from "@/components/page-header";
+import { useTenant } from "@/contexts/tenant-context";
 
 function getStatusBadgeClass(status: string) {
   switch (status.toLowerCase()) {
@@ -49,23 +51,25 @@ function formatTimeAgo(date: Date | string | undefined): string {
 }
 
 export default function Dashboard() {
+  const { selectedTenant, setSelectedTenant } = useTenant();
+
   const { data: stats, refetch: refetchStats } = useQuery<DashboardStats>({
-    queryKey: ['/api/dashboard/stats'],
+    queryKey: ['/api/dashboard/stats', selectedTenant],
     refetchInterval: 30000, // Refresh every 30 seconds
   });
 
   const { data: conversations } = useQuery<Conversation[]>({
-    queryKey: ['/api/conversations'],
+    queryKey: ['/api/conversations', selectedTenant],
     refetchInterval: 30000,
   });
 
   const { data: commands } = useQuery<BotCommand[]>({
-    queryKey: ['/api/commands'],
+    queryKey: ['/api/commands', selectedTenant],
     refetchInterval: 60000, // Refresh every minute
   });
 
   const { data: systemStatus } = useQuery<SystemStatus[]>({
-    queryKey: ['/api/system-status'],
+    queryKey: ['/api/system-status', selectedTenant],
     refetchInterval: 30000,
   });
 
@@ -74,30 +78,29 @@ export default function Dashboard() {
   };
 
   return (
-    <main className="flex-1 ml-64 p-8">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="text-2xl font-bold text-foreground">Bot Dashboard</h2>
-          <div className="flex items-center space-x-4">
-            <Button
-              variant="secondary"
-              onClick={handleRefresh}
-              data-testid="button-refresh"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh
-            </Button>
-            <div className="flex items-center space-x-2">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm text-muted-foreground">System Online</span>
-            </div>
-          </div>
+    <div className="flex-1 bg-background">
+      <PageHeader
+        title="Dashboard"
+        description="Мониторинг и управление мульти-тенантными AI ботами"
+        selectedTenant={selectedTenant}
+        onTenantChange={setSelectedTenant}
+      >
+        <Button
+          variant="secondary"
+          onClick={handleRefresh}
+          data-testid="button-refresh"
+        >
+          <RefreshCw className="w-4 h-4 mr-2" />
+          Обновить
+        </Button>
+        <div className="flex items-center space-x-2">
+          <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+          <span className="text-sm text-muted-foreground">Система онлайн</span>
         </div>
-        <p className="text-muted-foreground">Monitor and manage your AI-powered Telegram and WhatsApp bots</p>
-      </div>
+      </PageHeader>
 
-      {/* Stats Grid */}
+      <main className="p-6">
+        {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <Card className="animate-fade-in">
           <CardContent className="p-6">
@@ -389,6 +392,7 @@ export default function Dashboard() {
           </div>
         </CardContent>
       </Card>
-    </main>
+      </main>
+    </div>
   );
 }

@@ -81,6 +81,7 @@ export interface IStorage {
   getTenantByKey(key: string): Promise<Tenant | undefined>;
   createTenant(patch: Partial<Tenant>): Promise<Tenant>;
   updateTenant(id: string, patch: Partial<Tenant>): Promise<Tenant | null>;
+  deleteTenant(id: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -159,6 +160,13 @@ export class MemStorage implements IStorage {
     if (idx === -1) return null;
     this.tenants[idx] = { ...this.tenants[idx], ...patch };
     return this.tenants[idx];
+  }
+
+  async deleteTenant(id: string): Promise<boolean> {
+    const idx = this.tenants.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    this.tenants.splice(idx, 1);
+    return true;
   }
   // ---- AI Industry Configs ----
   async getIndustryConfigs(): Promise<IndustryConfig[]> {

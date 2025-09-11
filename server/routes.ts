@@ -68,6 +68,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.delete("/api/tenants/:id", async (req: Request, res: Response) => {
+    try {
+      const deleted = await storage.deleteTenant(req.params.id);
+      if (!deleted) return res.status(404).json({ error: "Not found" });
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("DELETE /api/tenants/:id error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
   // ---------- Multi-tenant Webhooks ----------
   // Telegram webhook
   app.post("/webhook/tg/:tenantKey", async (req: Request, res: Response) => {
@@ -93,7 +104,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Resolve customer ID (for now use chatId as customerId, in real app this would be database lookup)
       const customerId = parseInt(normalized.chatId) || 1;
-      const tenantId = tenant.id;
+      const tenantId = parseInt(tenant.id) || 1; // Convert to number as expected by handleDialog
       
       // Обработка диалога
       const response = await handleDialog({
@@ -109,14 +120,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         // Handle voice response if TTS is enabled
-        if (response.tts) {
+        if ((response as any).tts) {
           // TODO: Send voice message with TTS buffer
           console.log("TTS response available but voice sending not implemented yet");
         }
         
         // Handle attachments
-        if (response.attachments?.length) {
-          for (const attachment of response.attachments) {
+        if ((response as any).attachments?.length) {
+          for (const attachment of (response as any).attachments) {
             if (attachment.type === "image") {
               await bot.sendPhoto(normalized.chatId, attachment.url);
             } else if (attachment.type === "file") {
@@ -151,7 +162,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Найти тенанта по WhatsApp phone_id
-      const metadata = body.entry?.[0]?.changes?.[0]?.value?.metadata;
+      const metadata = req.body.entry?.[0]?.changes?.[0]?.value?.metadata;
       const phoneId = metadata?.phone_number_id || metadata?.display_phone_number;
       
       let tenant;
@@ -176,7 +187,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Resolve customer ID (for now use chatId as customerId, in real app this would be database lookup)
       const customerId = parseInt(normalized.chatId) || 1;
-      const tenantId = tenant.id;
+      const tenantId = parseInt(tenant.id) || 1; // Convert to number as expected by handleDialog
       
       // Обработка диалога
       const response = await handleDialog({
@@ -194,14 +205,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
         
         // Handle voice response if TTS is enabled
-        if (response.tts) {
+        if ((response as any).tts) {
           // TODO: Send voice message with TTS buffer
           console.log("TTS response available but voice sending not implemented yet");
         }
         
         // Handle attachments
-        if (response.attachments?.length) {
-          for (const attachment of response.attachments) {
+        if ((response as any).attachments?.length) {
+          for (const attachment of (response as any).attachments) {
             // TODO: Implement WhatsApp media sending
             console.log(`WhatsApp attachment sending not implemented: ${attachment.type} - ${attachment.url}`);
           }
@@ -221,8 +232,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/catalog/search", async (req: Request, res: Response) => {
     try {
       const { q, tenant, limit = 20 } = req.query;
-      const catalogService = await import("../services/catalog");
-      const results = await catalogService.catalogService.searchProducts(
+      const { catalogService } = await import("../services/catalog");
+      const results = await catalogService.searchProducts(
         String(tenant),
         String(q),
         Number(limit)
@@ -238,8 +249,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sku } = req.params;
       const { tenant } = req.query;
-      const catalogService = await import("../services/catalog");
-      const product = await catalogService.catalogService.getProductBySku(
+      const { catalogService } = await import("../services/catalog");
+      const product = await catalogService.getProductBySku(
         String(tenant),
         sku
       );
@@ -299,6 +310,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/docs/quote", async (req: Request, res: Response) => {
     try {
       const { tenant, lead_id, customerData, items } = req.body;
+      // TODO: Implement document service
+      const fileUrl = null; // documentService.generateQuote not implemented yet
+      /*
       const documentService = await import("../services/documents");
       const fileUrl = await documentService.documentService.generateQuote(
         String(tenant),
@@ -312,6 +326,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           notes: customerData.notes,
         }
       );
+      */
       res.json({ success: !!fileUrl, fileUrl, tenant });
     } catch (error) {
       console.error("Quote generation error:", error);
@@ -322,6 +337,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/docs/invoice", async (req: Request, res: Response) => {
     try {
       const { tenant, order_id, orderData, items } = req.body;
+      // TODO: Implement document service
+      const fileUrl = null; // documentService.generateInvoice not implemented yet
+      /*
       const documentService = await import("../services/documents");
       const fileUrl = await documentService.documentService.generateInvoice(
         String(tenant),
@@ -337,6 +355,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           dueDate: orderData.dueDate ? new Date(orderData.dueDate) : undefined,
         }
       );
+      */
       res.json({ success: !!fileUrl, fileUrl, tenant });
     } catch (error) {
       console.error("Invoice generation error:", error);

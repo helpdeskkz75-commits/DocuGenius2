@@ -9,12 +9,14 @@ import {
   Settings,
   User,
   TestTube,
+  Building2,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { cn } from "@/lib/utils";
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
+  { name: "Tenants", href: "/tenants", icon: Building2 },
   { name: "Conversations", href: "/conversations", icon: MessageCircle },
   { name: "Leads", href: "/leads", icon: Users },
   { name: "Catalog", href: "/catalog", icon: Package },

@@ -3,8 +3,10 @@ import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { TenantProvider } from "@/contexts/tenant-context";
 import { Sidebar } from "@/components/sidebar";
 import Dashboard from "@/pages/dashboard";
+import TenantsPage from "@/pages/tenants";
 import Conversations from "@/pages/conversations";
 import Leads from "@/pages/leads";
 import Catalog from "@/pages/catalog";
@@ -22,6 +24,7 @@ function Router() {
       <main className="flex-1 lg:ml-64 overflow-x-auto min-h-screen">
         <Switch>
           <Route path="/" component={Dashboard} />
+          <Route path="/tenants" component={TenantsPage} />
           <Route path="/conversations" component={Conversations} />
           <Route path="/leads" component={Leads} />
           <Route path="/catalog" component={Catalog} />
@@ -40,10 +43,12 @@ function Router() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Router />
-      </TooltipProvider>
+      <TenantProvider>
+        <TooltipProvider>
+          <Toaster />
+          <Router />
+        </TooltipProvider>
+      </TenantProvider>
     </QueryClientProvider>
   );
 }
