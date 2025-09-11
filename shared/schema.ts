@@ -34,6 +34,7 @@ export const tenants = pgTable("tenants", {
   languageDetection: boolean("language_detection").default(true),
   // Webhook management
   tgWebhookSetAt: timestamp("tg_webhook_set_at"),
+  webhookSecret: text("webhook_secret"),
   // Integrations
   kaspiMerchantId: text("kaspi_merchant_id"),
   crmWebhookUrl: text("crm_webhook_url"),

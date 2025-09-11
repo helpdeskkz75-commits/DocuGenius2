@@ -18,6 +18,7 @@ import { transcribeAudio } from "./services/asr";
 import { synthesizeSpeech } from "./services/tts";
 import { handleDialog } from "./dialog/orchestrator";
 import { CatalogService } from "./services/catalog";
+import { setTenantWebhook, deleteTenantWebhook, getWebhookInfo } from "./services/telegramWebhook";
 import TelegramBot from "node-telegram-bot-api";
 
 // Initialize bot for webhook response sending
@@ -63,8 +64,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/tenants/:id", async (req: Request, res: Response) => {
     try {
+      const oldTenant = await storage.getTenantById(req.params.id);
       const updated = await storage.updateTenant(req.params.id, req.body || {});
       if (!updated) return res.status(404).json({ error: "Not found" });
+      
+      // Автоматически устанавливаем webhook если tgToken изменился и тенант активен
+      if (oldTenant && req.body.tgToken && req.body.tgToken !== oldTenant.tgToken && updated.active) {
+        console.log(`[routes] tgToken changed for tenant ${updated.key}, setting webhook`);
+        await setTenantWebhook(updated);
+      }
+      
       res.json(updated);
     } catch (err: any) {
       console.error("PATCH /api/tenants/:id error", err);
@@ -83,12 +92,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ---------- Telegram Webhook Management ----------
+  app.post("/api/tenants/:id/tg/set-webhook", async (req: Request, res: Response) => {
+    try {
+      const tenant = await storage.getTenantById(req.params.id);
+      if (!tenant) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+      
+      const success = await setTenantWebhook(tenant);
+      if (success) {
+        res.json({ success: true, message: "Webhook set successfully" });
+      } else {
+        res.status(400).json({ error: "Failed to set webhook" });
+      }
+    } catch (err: any) {
+      console.error("POST /api/tenants/:id/tg/set-webhook error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.post("/api/tenants/:id/tg/delete-webhook", async (req: Request, res: Response) => {
+    try {
+      const tenant = await storage.getTenantById(req.params.id);
+      if (!tenant) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+      
+      const success = await deleteTenantWebhook(tenant);
+      if (success) {
+        res.json({ success: true, message: "Webhook deleted successfully" });
+      } else {
+        res.status(400).json({ error: "Failed to delete webhook" });
+      }
+    } catch (err: any) {
+      console.error("POST /api/tenants/:id/tg/delete-webhook error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.get("/api/tenants/:id/tg/webhook-info", async (req: Request, res: Response) => {
+    try {
+      const tenant = await storage.getTenantById(req.params.id);
+      if (!tenant) {
+        return res.status(404).json({ error: "Tenant not found" });
+      }
+      
+      const webhookInfo = await getWebhookInfo(tenant);
+      res.json({ webhookInfo, tenant: { key: tenant.key, tgWebhookSetAt: (tenant as any).tgWebhookSetAt } });
+    } catch (err: any) {
+      console.error("GET /api/tenants/:id/tg/webhook-info error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
   // ---------- Multi-tenant Webhooks ----------
   // Telegram webhook
   app.post("/webhook/tg/:tenantKey", async (req: Request, res: Response) => {
     try {
+      // Проверка секретного токена для безопасности
+      const secretToken = req.headers['x-telegram-bot-api-secret-token'] as string;
+      
       // normalizeIncoming → ASR (если voice/audio) → orchestrator → отправка ответа (text + voice при необходимости)
       const normalized = await normalizeIncoming(req);
+      
+      // Найти тенанта по tenantKey
+      const tenant = await storage.getTenantByKey(normalized.tenantKey);
+      if (!tenant || !tenant.active) {
+        console.warn(`[TG webhook] Invalid or inactive tenant: ${normalized.tenantKey}`);
+        return res.status(404).json({ error: 'Tenant not found or inactive' });
+      }
+      
+      // Проверяем секретный токен если он установлен
+      const expectedSecret = (tenant as any).webhookSecret;
+      if (expectedSecret && secretToken !== expectedSecret) {
+        console.warn(`[TG webhook] Invalid secret token for tenant: ${normalized.tenantKey}`);
+        return res.status(403).json({ error: 'Invalid secret token' });
+      }
       
       // ASR для голосовых сообщений
       if (normalized.kind === "voice" || normalized.kind === "audio") {
@@ -97,13 +177,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           normalized.text = transcribedText;
           normalized.kind = "text"; // Конвертируем в текст после ASR
         }
-      }
-      
-      // Найти тенанта по tenantKey
-      const tenant = await storage.getTenantByKey(normalized.tenantKey);
-      if (!tenant || !tenant.active) {
-        console.warn(`[TG webhook] Invalid or inactive tenant: ${normalized.tenantKey}`);
-        return res.status(404).json({ error: 'Tenant not found or inactive' });
       }
       
       // Resolve customer ID (for now use chatId as customerId, in real app this would be database lookup)
@@ -117,25 +190,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         tenantId
       });
       
-      // Отправка ответа через Telegram Bot API
+      // Отправка ответа через Telegram Bot API используя токен тенанта
       try {
-        if (response.text) {
-          await bot.sendMessage(normalized.chatId, response.text);
+        if (response.text && tenant.tgToken) {
+          // Создаем бот для конкретного тенанта
+          const tenantBot = new TelegramBot(tenant.tgToken, { polling: false });
+          await tenantBot.sendMessage(normalized.chatId, response.text);
         }
         
         // Handle voice response if TTS is enabled
-        if ((response as any).tts) {
+        if ((response as any).tts && tenant.tgToken) {
+          const tenantBot = new TelegramBot(tenant.tgToken, { polling: false });
           // TODO: Send voice message with TTS buffer
           console.log("TTS response available but voice sending not implemented yet");
         }
         
         // Handle attachments
-        if ((response as any).attachments?.length) {
+        if ((response as any).attachments?.length && tenant.tgToken) {
+          const tenantBot = new TelegramBot(tenant.tgToken, { polling: false });
           for (const attachment of (response as any).attachments) {
             if (attachment.type === "image") {
-              await bot.sendPhoto(normalized.chatId, attachment.url);
+              await tenantBot.sendPhoto(normalized.chatId, attachment.url);
             } else if (attachment.type === "file") {
-              await bot.sendDocument(normalized.chatId, attachment.url);
+              await tenantBot.sendDocument(normalized.chatId, attachment.url);
             }
           }
         }
