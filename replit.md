@@ -2,7 +2,18 @@
 
 ## Overview
 
-DocuGenius is a full-stack AI-powered bot management system designed for handling customer interactions across multiple channels (Telegram and WhatsApp). The system features a React-based dashboard for monitoring conversations, managing leads, tracking products, and analyzing bot performance. Built with Node.js/Express backend, TypeScript throughout, and PostgreSQL database with Drizzle ORM.
+DocuGenius is a full-stack AI-powered **multi-tenant** chatbot system supporting text/voice/image interactions via Telegram and WhatsApp, with ASR/TTS capabilities, Google Drive integration, and a pure dialog interface. The system features a React-based admin panel for multi-tenant management, conversation monitoring, lead tracking, and analytics. Built with Node.js/Express backend, TypeScript throughout, and PostgreSQL database with Drizzle ORM.
+
+## Recent Changes
+
+- **Multi-tenant architecture** implemented with complete data isolation
+- **Admin panel** upgraded with tenant management (Create, Read, Update, Delete)
+- **Tenant context switching** with persistent localStorage selection  
+- **Pure dialog interface** - no buttons/keyboards, conversation-driven interaction
+- **Voice & Image support** added for both Telegram and WhatsApp channels
+- **Google Drive integration** for document storage and management
+- **ASR/TTS services** for voice message processing
+- **FSM-based dialog orchestrator** with 3-slot funnel (purpose/volume/budget → deadline/conditions)
 
 ## User Preferences
 
@@ -14,9 +25,14 @@ Preferred communication style: Simple, everyday language.
 - **Framework**: React with TypeScript
 - **Routing**: Wouter for client-side routing
 - **State Management**: TanStack Query for server state management
+- **Multi-tenant Context**: Global tenant context with localStorage persistence
 - **UI Components**: Radix UI primitives with shadcn/ui design system
 - **Styling**: Tailwind CSS with CSS variables for theming
 - **Build Tool**: Vite with custom configuration for development and production
+- **Admin Features**: 
+  - Tenant management page with full CRUD operations
+  - Tenant selector in page headers for context switching
+  - Data scoped by tenant ID in all API calls
 
 ### Backend Architecture
 - **Runtime**: Node.js with Express server
@@ -28,23 +44,37 @@ Preferred communication style: Simple, everyday language.
 
 ### Database Design
 - **ORM**: Drizzle with PostgreSQL
-- **Schema**: Five main tables - users, conversations, leads, products, bot_commands, system_status
-- **Relationships**: Foreign key relationships between conversations and users, leads tracking across channels
-- **Migration**: Drizzle Kit for schema migrations
+- **Multi-tenant Schema**: Eight core tables with tenant isolation via foreign keys
+  - `tenants` - tenant configuration (tokens, settings, Google Drive folders)
+  - `catalogs` - tenant-specific product catalogs with search optimization
+  - `customers` - customer data per tenant with chat integration
+  - `carts` & `cart_items` - shopping cart functionality
+  - `orders` - order management with tenant scoping
+  - `tenant_leads` - lead tracking with file attachments (tenant-scoped)
+  - `texts` - customizable tenant-specific text content
+- **Legacy Schema**: Base tables for system-wide data (users, conversations, leads, products, bot_commands, system_status)
+- **Data Isolation**: All tenant data properly scoped with foreign key constraints
+- **Migration**: Drizzle Kit with generated SQL migrations in `/migrations`
 
 ### AI and Bot Features
 - **Multi-channel Support**: Telegram and WhatsApp integration with unified bot logic
+- **Pure Dialog Interface**: No buttons/keyboards - conversation-driven interaction only
+- **Voice & Image Processing**: 
+  - ASR (Automatic Speech Recognition) with Kazakh/Russian language support
+  - TTS (Text-to-Speech) for voice responses 
+  - Image analysis and processing capabilities
 - **OpenAI Integration**: GPT-powered conversational AI with industry-specific prompts
-- **Audio Processing**: Voice message transcription using OpenAI Whisper API
-- **Language Detection**: Automatic Kazakh/Russian language detection for both text and audio
-- **Voice-to-Text**: Real-time speech recognition with support for Russian and Kazakh languages
-- **Conversational Funnel**: 3-step lead qualification process with AI fallback
+- **FSM Dialog Orchestrator**: Finite State Machine with 3-slot funnel system:
+  - Slot 1: Purpose/Volume/Budget collection
+  - Slot 2: Deadline/Conditions refinement  
+  - Transition logic with AI fallback handling
+- **Language Detection**: Automatic Kazakh/Russian language detection for text and audio
+- **Multi-tenant Webhooks**: Separate webhook endpoints per tenant (`/webhook/tg/:tenantKey`, `/webhook/wa/:tenantKey`)
 - **Industry Adaptation**: AI personality and responses tailored to 12+ business sectors
 - **Smart Recommendations**: AI-powered product suggestions based on user queries
 - **Context Memory**: Conversation history tracking for personalized interactions
-- **Product Search**: Integration with Google Sheets for real-time catalog access
-- **Lead Management**: Automated lead capture, tracking, and Google Sheets sync
-- **QR Code Generation**: Payment QR code generation capability
+- **Google Drive Integration**: Document storage and retrieval with tenant-specific folders
+- **Lead Management**: Automated lead capture with file attachments and tenant isolation
 
 ### Authentication and Authorization
 - **Session-based Authentication**: Express sessions with PostgreSQL storage
