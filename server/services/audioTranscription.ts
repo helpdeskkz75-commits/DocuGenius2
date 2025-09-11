@@ -10,6 +10,8 @@ type TgGetFileResponse = { ok: boolean; result?: { file_path?: string } };
 export async function transcribeTelegramFile(
   fileId: string,
   botToken: string,
+  tenantKey?: string,
+  chatId?: string
 ): Promise<string | null> {
   if (!fileId || !botToken) return null;
 
@@ -47,6 +49,21 @@ export async function transcribeTelegramFile(
     if (process.env.DEBUG_TRANSCRIBE === "true") {
       console.log("[transcribe]", { fileId, mode, model, text });
     }
+    
+    // Enhanced: Upload to Google Drive if tenant configured
+    if (text && tenantKey && chatId) {
+      try {
+        const { MediaStorageService } = await import("./mediaStorage");
+        if (MediaStorageService.isGoogleDriveAvailable()) {
+          await MediaStorageService.uploadVoiceFile(tenantKey, chatId, tmpFile, text, mode as "ru" | "kk");
+        } else {
+          console.debug(`[transcribe] ${MediaStorageService.getGoogleDriveUnavailableMessage()}, skipping voice file storage`);
+        }
+      } catch (driveError) {
+        console.warn("[transcribe] Failed to upload to Drive:", driveError);
+      }
+    }
+    
     return text || null;
   } catch (e) {
     console.error("[transcribeTelegramFile] error:", e);

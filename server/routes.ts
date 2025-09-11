@@ -16,7 +16,7 @@ import { detectLang } from "./services/langDetect";
 import { normalizeIncoming } from "./services/normalizer";
 import { transcribeAudio } from "./services/asr";
 import { synthesizeSpeech } from "./services/tts";
-import { analyzeImage, analyzeImageWithContext } from "./services/vision";
+import { analyzeImage, analyzeImageWithContext, analyzeImageWithStorage, analyzeImageWithContextAndStorage } from "./services/vision";
 import { handleDialog } from "./dialog/orchestrator";
 import { CatalogService } from "./services/catalog";
 import { setTenantWebhook, deleteTenantWebhook, getWebhookInfo } from "./services/telegramWebhook";
@@ -186,10 +186,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let imageAnalysis: string;
           if (normalized.text && normalized.text.trim()) {
             // Пользователь добавил текст к изображению - контекстный анализ
-            imageAnalysis = await analyzeImageWithContext(normalized.mediaUrl, normalized.text, normalized.lang);
+            imageAnalysis = await analyzeImageWithContextAndStorage(
+              normalized.mediaUrl, 
+              normalized.text, 
+              normalized.tenantKey, 
+              normalized.chatId, 
+              normalized.lang
+            );
           } else {
             // Только изображение без текста - общий анализ
-            imageAnalysis = await analyzeImage(normalized.mediaUrl, normalized.lang);
+            imageAnalysis = await analyzeImageWithStorage(
+              normalized.mediaUrl, 
+              normalized.tenantKey, 
+              normalized.chatId, 
+              normalized.lang
+            );
           }
           normalized.text = imageAnalysis;
           normalized.kind = "text"; // Конвертируем в текст после анализа

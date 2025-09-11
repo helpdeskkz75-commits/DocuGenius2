@@ -892,7 +892,7 @@ bot.on("audio", async (msg) => {
     const fileId = msg.audio?.file_id;
     if (!fileId) return;
     await bot.sendChatAction(chatId, "typing");
-    const text = await transcribeTelegramFile(fileId, BOT_TOKEN);
+    const text = await transcribeTelegramFile(fileId, BOT_TOKEN, "default", chatId.toString());
     if (!text) {
       await bot.sendMessage(
         chatId,
@@ -913,7 +913,7 @@ bot.on("document", async (msg) => {
   if (!doc?.mime_type?.startsWith("audio/")) return; // пропускаем не-аудио
   try {
     await bot.sendChatAction(chatId, "typing");
-    const text = await transcribeTelegramFile(doc.file_id, BOT_TOKEN);
+    const text = await transcribeTelegramFile(doc.file_id, BOT_TOKEN, "default", chatId.toString());
     if (!text) {
       await bot.sendMessage(
         chatId,

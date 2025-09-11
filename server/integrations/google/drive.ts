@@ -23,7 +23,11 @@ export async function uploadFile(
   filePath: string,
   folderId?: string,
   mimeType?: string,
-  makePublic?: boolean
+  makePublic?: boolean,
+  metadata?: {
+    description?: string;
+    properties?: Record<string, string>;
+  }
 ): Promise<string | null> {
   const drive = getDriveClient();
   if (!drive) return null;
@@ -35,6 +39,14 @@ export async function uploadFile(
     
     if (folderId) {
       fileMetadata.parents = [folderId];
+    }
+
+    // Add metadata if provided
+    if (metadata?.description) {
+      fileMetadata.description = metadata.description;
+    }
+    if (metadata?.properties) {
+      fileMetadata.properties = metadata.properties;
     }
 
     const media = {

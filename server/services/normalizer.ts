@@ -100,8 +100,23 @@ export async function normalizeIncoming(req: any): Promise<NormalizedMessage> {
     const message = body.entry[0].changes[0].value.messages[0];
     const metadata = body.entry[0].changes[0].value.metadata;
     
-    // Resolve tenant by phone_id/metadata - simplified for now
-    const tenantKey = "default"; // TODO: implement tenant resolution by WA phone ID
+    // Resolve tenant by phone_id/metadata
+    let tenantKey = "default"; // Default fallback
+    const phoneId = metadata?.phone_number_id || metadata?.display_phone_number;
+    
+    if (phoneId) {
+      try {
+        const { storage } = await import("../storage");
+        const tenants = await storage.getTenants();
+        const tenant = tenants.find(t => t.waPhoneId === phoneId && t.active);
+        if (tenant) {
+          tenantKey = tenant.key;
+        }
+      } catch (error) {
+        console.warn("[normalizer] Failed to resolve tenant from WhatsApp phone ID:", error);
+      }
+    }
+    
     const chatId = message.from;
     
     let kind: "text"|"voice"|"audio"|"image" = "text";
