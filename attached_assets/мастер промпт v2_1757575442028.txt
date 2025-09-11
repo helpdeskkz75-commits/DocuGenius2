@@ -1,0 +1,398 @@
+МАСТЕР-ПРОМПТ v2 (скопируй целиком в Replit Agent)
+
+Задача: Привести репозиторий DocuGenius2 к требованиям: чистый диалог без кнопок, голос/изображения, пер-тенант ИИ-настройки, единая админ-вкладка «Tenants» (внутри — и настройки, и аналитика, и ИИ-промпт), RU/KZ локализация, исправление отступов/кнопок. Обязательно изменить текущий проект (не с нуля), покрыть проверками.
+
+0) Базовые требования и среда
+
+Явная поддержка RU/KZ: бот отвечает на языке обращения.
+
+Без кнопок/клавиатур в Telegram: только текст и голос, приём/отправка аудио, приём изображений.
+
+Каталоги/материалы бизнеса — Google Drive (у каждого тенанта gdriveFolderId).
+
+Все настройки пер-тенант (вкладка Tenants → карточка конкретного тенанта).
+
+Воронка из трёх уточняющих вопросов для первичного запроса.
+
+Интеграции CRM/KaspiQR/2GIS/WA/TG — в настройках тенанта.
+
+Мультиязычность: i18n RU/KZ в админке.
+
+Переменные окружения (добавить в .env)
+PUBLIC_URL=https://<ваш-домен>
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_TRANSCRIBE_MODEL=whisper-1
+OPENAI_TRANSCRIBE_LANGUAGE_MODE=auto   # auto|ru|kk
+TTS_PROVIDER=openai
+TELEGRAM_BOT_TOKEN=<по умолчанию, может быть пусто — используем из тенанта>
+GOOGLE_CREDENTIALS_JSON_BASE64=<service account b64>
+# опционально
+TZ=Asia/Almaty
+
+1) Входящие из Telegram: включить webhook пер-тенант (и убрать polling)
+
+Файлы: server/routes.ts, server/services/telegramWebhook.ts (новый), server/storage.ts, shared/schema.ts
+
+Добавь поля в таблицу tenants:
+
+systemPrompt text
+
+aiModel text default 'gpt-4o-mini'
+
+aiTemperature numeric default 0.7
+
+languageDetection boolean default true
+
+tgWebhookSetAt timestamp null
+
+kaspiMerchantId text null, crmWebhookUrl text null, twoGisUrl text null
+
+Сгенерируй drizzle-миграцию и применяй.
+
+Регистрация вебхука Telegram (пер-тенант): создай server/services/telegramWebhook.ts:
+
+setTenantWebhook(tenant) → https://api.telegram.org/bot{tenant.tgToken}/setWebhook?url=${PUBLIC_URL}/webhook/tg/${tenant.key}
+
+deleteTenantWebhook(tenant) при удалении токена или деактивации
+
+Обновляй tgWebhookSetAt при успешном setWebhook.
+
+Маршруты админки для вебхуков в server/routes.ts:
+
+POST /api/tenants/:id/tg/set-webhook
+
+POST /api/tenants/:id/tg/delete-webhook
+
+На PUT /api/tenants/:id — если tgToken изменён и тенант active=true, автоматически вызвать setTenantWebhook.
+
+Убедись, что входящий хук используется: уже есть POST /webhook/tg/:tenantKey. Оставить как «единственный» источник апдейтов TG. Ни polling, ни обработчиков из telegramBot.ts не использовать.
+
+Удалить/отключить старый UI Telegram: см. раздел 2.
+
+2) Полный отказ от кнопок/клавиатур Telegram
+
+Файл: server/services/telegramBot.ts
+
+Этот файл содержит reply-keyboard/inline-кнопки. Мы не хотим кнопок.
+
+Сделай один из двух вариантов (любой, но по умолчанию — первый):
+
+Полностью исключи этот сервис из пайплайна: не импортировать нигде, не инициализировать; оставь только вспомогательную функцию «отправить текст/фото/голос» (если нужно) либо перенеси их в routes.ts.
+
+Либо оставь файл, но удали все reply_markup, inline-кнопки, обработчики on('callback_query')/onText, оставь только функции sendMessage/sendPhoto/sendVoice.
+
+Проверь, что никакие команды /start не навешиваются как команды Telegram-бота (всё — через свободный ввод).
+
+3) Нормализация входящих: текст/голос/картинки
+
+Файлы: server/services/normalizer.ts, server/services/asr.ts, server/services/tts.ts, server/services/openai.ts, server/routes.ts
+
+3.1 Голос
+
+В POST /webhook/tg/:tenantKey уже есть ASR (transcribeAudio).
+Дополни: если вход был голос → после ответа синтезируй TTS и отправь голосом:
+
+// server/routes.ts (после получения response.text)
+if (normalized.kind === "voice" && response.text) {
+  const audio = await synthesizeSpeech(response.text, normalized.lang);
+  if (audio?.length) {
+    await bot.sendVoice(normalized.chatId, audio, {}, {
+      filename: 'reply.mp3',
+      contentType: 'audio/mpeg',
+    } as any);
+  }
+}
+
+
+Для WhatsApp — использовать клиент 360dialog отправки аудио.
+
+3.2 Картинки
+
+В normalizeIncoming уже ставится kind: "image" (Telegram фото/док).
+
+Добавь в server/services/openai.ts функцию:
+
+export async function analyzeImage({prompt, imageUrl, lang}: {prompt: string, imageUrl: string, lang: 'ru'|'kk'}): Promise<string> {
+  // вызов OpenAI Vision (или gpt-4o) с image_url + текстовым промптом;
+  // всегда отвечай на языке lang
+}
+
+
+В POST /webhook/tg/:tenantKey: если kind === "image" →
+
+Сохраняем оригинал в Google Drive папку тенанта (см. раздел 6).
+
+Отправляем результат analyzeImage(...) как текст (и как голос при необходимости).
+
+4) Диалоговый движок: LLM + воронка 3 вопросов + RU/KZ
+
+Файлы: server/dialog/orchestrator.ts, server/services/openai.ts, server/services/langDetect.ts, server/storage.ts (+ переход на БД в п.7)
+
+Подключи LLM-ответ
+В orchestrator.ts, по умолчанию, после parseUtterance(...):
+
+если явный intent (cart/search/quote etc.) — выполняем бизнес-метод;
+
+иначе — генерируем ответ через generateAIResponse(...), где:
+
+systemPrompt берём из тенанта (tenant.systemPrompt), а не из «отрасли»;
+
+temperature, maxTokens, aiModel — из тенанта;
+
+язык ответа — из detectLang(text).
+
+Воронка 3 вопросов (purpose → volume → budget):
+
+Храним состояние пер-customer в БД (таблица funnels или JSON conversations.state).
+
+Реализуй функции getFunnelState / updateFunnelState с БД.
+
+Когда нераспознанное намерение — задаём следующий недостающий вопрос; после complete формируем целевой «краткий бриф» и отдаём его в CRM webhook (если настроен в тенанте).
+
+Мультиязычность
+
+detectLang.ts оставить (правила RU/KZ).
+
+Все шаблонные ответы (вопросы воронки, help/stop) — сделать RU/KZ варианты.
+
+5) Админ-панель: объединить «Tenants» + «Settings» + «Analytics» и добавить ИИ-промпт пер-тенант
+
+Файлы: клиент client/src/..., серверные эндпоинты уже есть/добавим.
+
+5.1 Убрать лишние отступы
+
+Сейчас двойной отступ: в App.tsx есть lg:ml-64, и в страницах тоже ml-64/p-8.
+Исправь:
+
+В client/src/App.tsx оставить контейнер-layout (lg:ml-64),
+
+Во всех страницах (analytics.tsx, catalog.tsx, conversations.tsx, dashboard.tsx, leads.tsx, payments.tsx, settings.tsx):
+заменить верхний <main className="flex-1 ml-64 p-8"> → <div className="p-6 lg:p-8 w-full"> (без ml-64).
+
+Пройтись по страницам и убрать «плавающие» p-8/ml-64, где это даёт лишние поля.
+
+5.2 Перевод RU/KZ (i18n)
+
+Добавь простую i18n-обвязку (без тяжелых либ):
+
+client/src/i18n/index.ts: функция t(key, lang) + провайдер контекста;
+
+client/src/i18n/ru.json и kk.json — словари;
+
+В шапке админки — переключатель языка;
+
+Заменить все видимые строки на t('...') (Tenants, Analytics, Catalog, Leads, Dashboard, Settings/удаляется).
+
+5.3 Объединение страниц
+
+Страницу Settings удалить из сайдбара и роутера.
+
+Страницу Ai-config удалить (или спрятать под фиче-флагом для будущего).
+
+На странице Tenants:
+
+В карточке редактирования добавить поля:
+
+systemPrompt (Textarea, многострочное) — индивидуальный промпт экспертизы,
+
+aiModel (select), aiTemperature (slider), languageDetection (switch),
+
+kaspiMerchantId, crmWebhookUrl, twoGisUrl,
+
+gdriveFolderId (для сохранения медиа/доков),
+
+Кнопки:
+
+«Set Telegram Webhook» → POST /api/tenants/:id/tg/set-webhook,
+
+«Delete Telegram Webhook» → POST /api/tenants/:id/tg/delete-webhook.
+
+Analytics перенести внутрь карточки конкретного тенанта (и оставить опционально «Global» дашборд):
+
+Новый роут /tenants/:id (детальная страница тенанта) с вкладками: Overview | Analytics | Integrations | AI.
+
+Analytics берёт данные из /api/tenants/:id/analytics.
+
+5.4 Починить кнопки
+
+Пройтись по всем useMutation/onClick в Tenants и других страницах — убедиться, что API живые, добавь подсказки/тосты в onError/onSuccess.
+
+В Sidebar убрать пункты Settings, Ai-config, Test (если не нужны).
+
+6) Google Drive: хранение медиа/каталогов
+
+Файлы: server/integrations/google/drive.ts, server/routes.ts
+
+Уже есть uploadFileBuffer и createFolder.
+
+При получении изображения/документа от пользователя:
+
+сохраняй в папку тенанта (gdriveFolderId) под подпапку inbox/ (создай при необходимости),
+
+верни ссылку (приватную, без makePublic, если так задумано).
+
+Для каталогов — оставить текущую интеграцию с Google Sheets.
+
+Добавь эндпоинт POST /api/tenants/:id/drive/create-folder (создать базовую структуру папок для тенанта: inbox/, docs/, exports/).
+
+7) Отказ от in-memory storage: включить Drizzle/DB хотя бы для Tenants/Funnel/Conversations
+
+Файлы: server/storage.ts (+ новый server/storage.db.ts), shared/schema.ts
+
+Создай server/storage.db.ts с реализацией интерфейса storage на Drizzle + Neon (или SQLite в Replit, если Neon не доступен).
+
+Переведи Tenants, Conversations, Funnels (новая табличка или jsonb в conversations) на БД.
+
+Временный MemStorage можно оставить для «продуктов/команд», но план — тоже в БД.
+
+8) Логика WhatsApp (360dialog)
+
+В server/routes.ts блок /webhook/wa аналогичен TG: нормализация → ASR (если голос) → orchestrator → отправка текста/голоса/картинок.
+
+Проверь getWAClient() и методы sendText/sendAudio/sendImage, дотяни отправку аудио.
+
+9) Чистка кода и защита от регрессий
+
+Удали мёртвые импорты/файлы, связанные с меню TG.
+
+Добавь feature-flags через env (например, FEATURE_AI_CONFIG_BY_INDUSTRY=false).
+
+Логи: на вход/выход webhook, ошибки ASR/TTS/OpenAI, таймауты.
+
+Health-check: GET /api/health возвращает ok и версии.
+
+Е2Е чек-лист (см. ниже).
+
+10) Что именно менять (конкретика по файлам)
+10.1 client/src/App.tsx
+
+Было (фрагмент):
+
+<main className="flex-1 lg:ml-64 overflow-x-auto min-h-screen">
+
+
+Оставить как есть (контейнер).
+
+10.2 Страницы (пример client/src/pages/settings.tsx)
+
+— Удалить файл и маршрут из App.tsx, пункт из Sidebar.
+
+10.3 client/src/pages/tenants.tsx
+
+В формах Create/Edit добавить поля:
+
+systemPrompt (<Textarea>), aiModel (<Select>), aiTemperature (<Slider>), languageDetection (<Switch>),
+
+kaspiMerchantId, crmWebhookUrl, twoGisUrl, gdriveFolderId.
+
+Добавить две кнопки «Set TG Webhook» / «Delete TG Webhook», вызывающие соответствующие API.
+
+Убрать дублирующие внешние отступы: верхний контейнер заменить на <div className="p-6 lg:p-8 w-full">.
+
+(Аналогично поправить dashboard.tsx, analytics.tsx, conversations.tsx, leads.tsx, catalog.tsx, payments.tsx: убрать ml-64/чрезмерные p-8.)
+
+10.4 client/src/components/sidebar.tsx
+
+Удалить элементы: Settings, Ai-config, Test (если не нужны).
+
+Добавить переход на Tenants и, при клике на карточку тенанта, — детальную страницу /tenants/:id.
+
+10.5 server/routes.ts
+
+Добавить маршруты регистрации вебхуков TG.
+
+В обработчике /webhook/tg/:tenantKey:
+
+если вход voice → после генерации response.text вызвать TTS и отправить голос (см. код выше),
+
+если вход image → uploadFileBuffer в Drive, затем analyzeImage(...) → ответ текстом и опционально голосом.
+
+10.6 server/services/openai.ts
+
+Добавить analyzeImage(...) (см. п.3.2).
+
+В generateAIResponse(...) использовать настройки тенанта (получать tenant по tenantId/tenantKey).
+
+10.7 server/dialog/orchestrator.ts
+
+Подключить generateAIResponse как fallback.
+
+Реализовать getFunnelState/updateFunnelState через БД (или временно через storage, но с интерфейсом БД).
+
+Сделать RU/KZ версии вопросов/ответов.
+
+10.8 server/services/telegramBot.ts
+
+Отключить обработчики меню и inline-кнопки.
+Либо удалить файл, либо оставить только helper-функции отправки.
+
+10.9 server/integrations/google/drive.ts
+
+Убедиться, что можно создать подпапки inbox/, docs/, exports/.
+
+Добавить ф-ю ensureTenantFolders(tenant).
+
+10.10 shared/schema.ts + миграции
+
+Расширить tenants новыми полями (см. п.1).
+
+Добавить funnels (при необходимости) или conversations.state jsonb.
+
+11) Е2Е чек-лист приёмки
+
+Telegram
+
+Создать тенанта с key=acme, tgToken заполнен, active=true.
+
+Нажать «Set Telegram Webhook» → 200 OK, tgWebhookSetAt не пусто.
+
+Написать боту текст/голос/фото:
+
+Текст → осмысленный ответ (RU или KZ), без кнопок.
+
+Голос → распознан, ответ приходит голосом.
+
+Фото → сохраняется в Drive (inbox/), текстовый анализ в ответ.
+
+WhatsApp
+
+Входящее сообщение → текстовый ответ; голос → ответ голосом.
+
+Воронка 3 вопросов
+
+Без явного намерения — вопросы purpose → volume → budget; после complete — бриф уходит в crmWebhookUrl.
+
+Админ-панель
+
+Вкладка Tenants содержит всё: интеграции, ИИ-настройки, аналитика.
+
+Все кнопки работают, ошибок в консоли нет.
+
+Отступы ровные, ничего «не уплывает».
+
+i18n
+
+Переключатель RU/KZ работает на всех страницах.
+
+Google Drive
+
+Созданы подпапки, изображения пользователей сохраняются.
+
+12) Что удалить/запретить
+
+Любые reply_markup/inline-кнопки/меню в TG.
+
+Дублирование настроек между Settings и Tenants.
+
+Жёсткие строки на русском — заменить на i18n (RU/KZ).
+
+13) Нюансы/грабли
+
+Без PUBLIC_URL и корректной доступности хоста webhook не заработает.
+
+В Replit убедиться, что порт и домен доступны снаружи.
+
+Если нет Neon — временно SQLite + Drizzle, один файл БД.
+
+Для TTS/ASR проверь лимиты OpenAI; в случае ошибки — отправляй текстовый fallback и логируй.

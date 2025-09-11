@@ -17,10 +17,14 @@ import { normalizeIncoming } from "./services/normalizer";
 import { transcribeAudio } from "./services/asr";
 import { synthesizeSpeech } from "./services/tts";
 import { handleDialog } from "./dialog/orchestrator";
+import { CatalogService } from "./services/catalog";
 import TelegramBot from "node-telegram-bot-api";
 
 // Initialize bot for webhook response sending
 const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN || "", { polling: false });
+
+// Initialize catalog service
+const catalogService = new CatalogService();
 
 /**
  * registerRoutes(app) — регистрирует все публичные эндпоинты.
@@ -232,7 +236,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/catalog/search", async (req: Request, res: Response) => {
     try {
       const { q, tenant, limit = 20 } = req.query;
-      const { catalogService } = await import("../services/catalog");
       const results = await catalogService.searchProducts(
         String(tenant),
         String(q),
@@ -249,7 +252,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sku } = req.params;
       const { tenant } = req.query;
-      const { catalogService } = await import("../services/catalog");
       const product = await catalogService.getProductBySku(
         String(tenant),
         sku

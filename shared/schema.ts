@@ -27,6 +27,17 @@ export const tenants = pgTable("tenants", {
   currency: text("currency").default("KZT"),
   pricePolicy: text("price_policy").default("retail"),
   createdAt: timestamp("created_at").defaultNow(),
+  // AI Settings per-tenant  
+  systemPrompt: text("system_prompt"),
+  aiModel: text("ai_model").default("gpt-4o-mini"),
+  aiTemperature: numeric("ai_temperature", { precision: 3, scale: 2 }).default("0.7"),
+  languageDetection: boolean("language_detection").default(true),
+  // Webhook management
+  tgWebhookSetAt: timestamp("tg_webhook_set_at"),
+  // Integrations
+  kaspiMerchantId: text("kaspi_merchant_id"),
+  crmWebhookUrl: text("crm_webhook_url"),
+  twoGisUrl: text("two_gis_url"),
 });
 
 export const catalogs = pgTable("catalogs", {
