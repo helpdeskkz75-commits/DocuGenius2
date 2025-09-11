@@ -16,6 +16,7 @@ import { detectLang } from "./services/langDetect";
 import { normalizeIncoming } from "./services/normalizer";
 import { transcribeAudio } from "./services/asr";
 import { synthesizeSpeech } from "./services/tts";
+import { analyzeImage, analyzeImageWithContext } from "./services/vision";
 import { handleDialog } from "./dialog/orchestrator";
 import { CatalogService } from "./services/catalog";
 import { setTenantWebhook, deleteTenantWebhook, getWebhookInfo } from "./services/telegramWebhook";
@@ -179,6 +180,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
+      // Vision API для анализа изображений
+      if (normalized.kind === "image") {
+        if (normalized.mediaUrl) {
+          let imageAnalysis: string;
+          if (normalized.text && normalized.text.trim()) {
+            // Пользователь добавил текст к изображению - контекстный анализ
+            imageAnalysis = await analyzeImageWithContext(normalized.mediaUrl, normalized.text, normalized.lang);
+          } else {
+            // Только изображение без текста - общий анализ
+            imageAnalysis = await analyzeImage(normalized.mediaUrl, normalized.lang);
+          }
+          normalized.text = imageAnalysis;
+          normalized.kind = "text"; // Конвертируем в текст после анализа
+        }
+      }
+      
       // Resolve customer ID (for now use chatId as customerId, in real app this would be database lookup)
       const customerId = parseInt(normalized.chatId) || 1;
       const tenantId = parseInt(tenant.id) || 1; // Convert to number as expected by handleDialog
@@ -195,14 +212,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (response.text && tenant.tgToken) {
           // Создаем бот для конкретного тенанта
           const tenantBot = new TelegramBot(tenant.tgToken, { polling: false });
+          
+          // Отправляем текстовый ответ
           await tenantBot.sendMessage(normalized.chatId, response.text);
-        }
-        
-        // Handle voice response if TTS is enabled
-        if ((response as any).tts && tenant.tgToken) {
-          const tenantBot = new TelegramBot(tenant.tgToken, { polling: false });
-          // TODO: Send voice message with TTS buffer
-          console.log("TTS response available but voice sending not implemented yet");
+          
+          // Дополнительно отправляем голосовой ответ если включен TTS
+          if (tenant.languageDetection !== false) { // Если включено распознавание языков, то поддерживаем TTS
+            try {
+              const ttsBuffer = await synthesizeSpeech(response.text, normalized.lang);
+              if (ttsBuffer.length > 0) {
+                await tenantBot.sendVoice(normalized.chatId, ttsBuffer);
+              }
+            } catch (ttsError) {
+              console.warn(`[TG webhook] TTS failed for tenant ${tenant.key}:`, ttsError);
+              // Не фейлим весь запрос из-за ошибки TTS
+            }
+          }
         }
         
         // Handle attachments
@@ -239,6 +264,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const transcribedText = await transcribeAudio(normalized.mediaUrl, normalized.lang);
           normalized.text = transcribedText;
           normalized.kind = "text";
+        }
+      }
+      
+      // Vision API для анализа изображений
+      if (normalized.kind === "image") {
+        if (normalized.mediaUrl) {
+          let imageAnalysis: string;
+          if (normalized.text && normalized.text.trim()) {
+            // Пользователь добавил текст к изображению - контекстный анализ
+            imageAnalysis = await analyzeImageWithContext(normalized.mediaUrl, normalized.text, normalized.lang);
+          } else {
+            // Только изображение без текста - общий анализ
+            imageAnalysis = await analyzeImage(normalized.mediaUrl, normalized.lang);
+          }
+          normalized.text = imageAnalysis;
+          normalized.kind = "text"; // Конвертируем в текст после анализа
         }
       }
       
@@ -282,13 +323,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const waClient = getWAClient();
         
         if (response.text) {
+          // Отправляем текстовый ответ
           await waClient.sendText(normalized.chatId, response.text);
-        }
-        
-        // Handle voice response if TTS is enabled
-        if ((response as any).tts) {
-          // TODO: Send voice message with TTS buffer
-          console.log("TTS response available but voice sending not implemented yet");
+          
+          // Дополнительно отправляем голосовой ответ если включен TTS
+          if (tenant.languageDetection !== false) { // Если включено распознавание языков, то поддерживаем TTS
+            try {
+              const ttsBuffer = await synthesizeSpeech(response.text, normalized.lang);
+              if (ttsBuffer.length > 0) {
+                await waClient.sendVoice(normalized.chatId, ttsBuffer);
+              }
+            } catch (ttsError) {
+              console.warn(`[WA webhook] TTS failed for tenant ${tenant.key}:`, ttsError);
+              // Не фейлим весь запрос из-за ошибки TTS
+            }
+          }
         }
         
         // Handle attachments
