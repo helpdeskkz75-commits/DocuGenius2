@@ -221,8 +221,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/catalog/search", async (req: Request, res: Response) => {
     try {
       const { q, tenant, limit = 20 } = req.query;
-      // TODO: FTS+trgm поиск по каталогу
-      res.json({ results: [], query: q, tenant, limit });
+      const catalogService = await import("../services/catalog");
+      const results = await catalogService.catalogService.searchProducts(
+        String(tenant),
+        String(q),
+        Number(limit)
+      );
+      res.json({ results, query: q, tenant, limit });
     } catch (error) {
       console.error("Catalog search error:", error);
       res.status(500).json({ error: "internal_error" });
@@ -233,8 +238,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sku } = req.params;
       const { tenant } = req.query;
-      // TODO: Получить товар по SKU для тенанта
-      res.json({ sku, tenant, product: null });
+      const catalogService = await import("../services/catalog");
+      const product = await catalogService.catalogService.getProductBySku(
+        String(tenant),
+        sku
+      );
+      res.json({ sku, tenant, product });
     } catch (error) {
       console.error("Catalog SKU error:", error);
       res.status(500).json({ error: "internal_error" });
@@ -289,9 +298,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ---------- Docs Generation ----------
   app.post("/api/docs/quote", async (req: Request, res: Response) => {
     try {
-      const { tenant, lead_id } = req.body;
-      // TODO: DOCX→PDF→GDrive → ссылка
-      res.json({ success: true, fileUrl: "https://example.com/quote.pdf", tenant });
+      const { tenant, lead_id, customerData, items } = req.body;
+      const documentService = await import("../services/documents");
+      const fileUrl = await documentService.documentService.generateQuote(
+        String(tenant),
+        String(lead_id),
+        {
+          customerName: customerData.name,
+          customerEmail: customerData.email,
+          customerPhone: customerData.phone,
+          items: items || [],
+          deliveryAddress: customerData.address,
+          notes: customerData.notes,
+        }
+      );
+      res.json({ success: !!fileUrl, fileUrl, tenant });
     } catch (error) {
       console.error("Quote generation error:", error);
       res.status(500).json({ error: "internal_error" });
@@ -300,9 +321,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/docs/invoice", async (req: Request, res: Response) => {
     try {
-      const { tenant, order_id } = req.body;
-      // TODO: Генерация счёта
-      res.json({ success: true, fileUrl: "https://example.com/invoice.pdf", tenant });
+      const { tenant, order_id, orderData, items } = req.body;
+      const documentService = await import("../services/documents");
+      const fileUrl = await documentService.documentService.generateInvoice(
+        String(tenant),
+        String(order_id),
+        {
+          orderNumber: orderData.orderNumber,
+          customerName: orderData.customerName,
+          customerEmail: orderData.customerEmail,
+          customerPhone: orderData.customerPhone,
+          items: items || [],
+          deliveryAddress: orderData.deliveryAddress,
+          paymentMethod: orderData.paymentMethod,
+          dueDate: orderData.dueDate ? new Date(orderData.dueDate) : undefined,
+        }
+      );
+      res.json({ success: !!fileUrl, fileUrl, tenant });
     } catch (error) {
       console.error("Invoice generation error:", error);
       res.status(500).json({ error: "internal_error" });

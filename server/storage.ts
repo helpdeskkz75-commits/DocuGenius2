@@ -30,6 +30,7 @@ export type Tenant = {
   leadsRange?: string;
   callbacksSheetId?: string;
   callbacksRange?: string;
+  gdriveFolderId?: string;
   texts?: Record<string, string>;
   active: boolean;
 };
@@ -76,6 +77,7 @@ export interface IStorage {
 
   // Tenant methods
   getTenants(): Promise<Tenant[]>;
+  getTenantById(id: string): Promise<Tenant | undefined>;
   getTenantByKey(key: string): Promise<Tenant | undefined>;
   createTenant(patch: Partial<Tenant>): Promise<Tenant>;
   updateTenant(id: string, patch: Partial<Tenant>): Promise<Tenant | null>;
@@ -104,6 +106,7 @@ export class MemStorage implements IStorage {
       leadsRange: process.env.LEADS_RANGE || "Sheet1!A:Z",
       callbacksSheetId: process.env.CALLBACKS_SHEET_ID || "",
       callbacksRange: process.env.CALLBACKS_RANGE || "Sheet1!A:Z",
+      gdriveFolderId: process.env.GDRIVE_FOLDER_ID || "",
       texts: {},
       active: true,
     },
@@ -111,6 +114,10 @@ export class MemStorage implements IStorage {
   // ✅ методы, которых не хватало
   async getTenants(): Promise<Tenant[]> {
     return this.tenants;
+  }
+
+  async getTenantById(id: string): Promise<Tenant | undefined> {
+    return this.tenants.find((t) => t.id === id);
   }
 
   async getTenantByKey(key: string): Promise<Tenant | undefined> {
@@ -136,6 +143,7 @@ export class MemStorage implements IStorage {
       leadsRange: patch.leadsRange || "Sheet1!A:Z",
       callbacksSheetId: patch.callbacksSheetId || "",
       callbacksRange: patch.callbacksRange || "Sheet1!A:Z",
+      gdriveFolderId: patch.gdriveFolderId || "",
       texts: patch.texts || {},
       active: patch.active ?? true,
     };
