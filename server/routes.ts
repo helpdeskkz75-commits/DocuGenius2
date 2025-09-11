@@ -1,5 +1,7 @@
-import type { Express } from "express";
+// server/routes.ts
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
+
 import { storage } from "./storage";
 import { getWAClient } from "./integrations/whatsapp/factory";
 import {
@@ -12,70 +14,127 @@ import { telegramBotService } from "./services/telegramBot";
 import { funnelService } from "./services/funnel";
 import { detectLang } from "./services/langDetect";
 
+/**
+ * registerRoutes(app) — регистрирует все публичные эндпоинты.
+ * Возвращает http.Server (createServer(app)) чтобы внешняя обвязка могла слушать порт.
+ */
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Initialize Telegram bot
-  await telegramBotService.initialize();
+  // Инициализация Telegram бота — пробуем безопасно
+  try {
+    await telegramBotService.initialize();
+    console.info("[routes] telegramBotService initialized");
+  } catch (err) {
+    // не фэйлим стартап приложения — бот может инициализироваться позднее
+    console.warn("[routes] telegramBotService init failed:", err);
+  }
+
+  // ---------- Tenants ----------
+  app.get("/api/tenants", async (_req: Request, res: Response) => {
+    try {
+      const t = await storage.getTenants();
+      res.json(t);
+    } catch (err: any) {
+      console.error("GET /api/tenants error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.post("/api/tenants", async (req: Request, res: Response) => {
+    try {
+      const created = await storage.createTenant(req.body || {});
+      res.json(created);
+    } catch (err: any) {
+      console.error("POST /api/tenants error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.patch("/api/tenants/:id", async (req: Request, res: Response) => {
+    try {
+      const updated = await storage.updateTenant(req.params.id, req.body || {});
+      if (!updated) return res.status(404).json({ error: "Not found" });
+      res.json(updated);
+    } catch (err: any) {
+      console.error("PATCH /api/tenants/:id error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
 
   // ---------- AI Industry Configs ----------
-  app.get("/api/ai/industries", async (_req, res) => {
-    const items = await storage.getIndustryConfigs();
-    // простые метрики для шапки
-    const configured = items.filter((i) => i.systemPrompt?.trim()).length;
-    const active = items.filter((i) => i.active).length;
-    const totalUsers = items.reduce((a, i) => a + (i.usersCount || 0), 0);
-    res.json({ items, stats: { configured, active, totalUsers } });
+  app.get("/api/ai/industries", async (_req: Request, res: Response) => {
+    try {
+      const items = await storage.getIndustryConfigs();
+      const configured = items.filter((i) => i.systemPrompt?.trim()).length;
+      const active = items.filter((i) => i.active).length;
+      const totalUsers = items.reduce((a, i) => a + (i.usersCount || 0), 0);
+      res.json({ items, stats: { configured, active, totalUsers } });
+    } catch (err: any) {
+      console.error("GET /api/ai/industries error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
   });
 
-  app.post("/api/ai/industries", async (req, res) => {
-    const body = req.body as {
-      key: string;
-      title: string;
-      active?: boolean;
-      usersCount?: number;
-      systemPrompt?: string;
-    };
-    if (!body?.key || !body?.title)
-      return res.status(400).json({ error: "key and title required" });
-    const created = await storage.createIndustryConfig({
-      key: body.key as any,
-      title: body.title,
-      active: !!body.active,
-      usersCount: body.usersCount ?? 0,
-      systemPrompt: body.systemPrompt ?? "",
-    });
-    res.json(created);
+  app.post("/api/ai/industries", async (req: Request, res: Response) => {
+    try {
+      const body = req.body as {
+        key: string;
+        title: string;
+        active?: boolean;
+        usersCount?: number;
+        systemPrompt?: string;
+      };
+      if (!body?.key || !body?.title)
+        return res.status(400).json({ error: "key and title required" });
+
+      const created = await storage.createIndustryConfig({
+        key: body.key as any,
+        title: body.title,
+        active: !!body.active,
+        usersCount: body.usersCount ?? 0,
+        systemPrompt: body.systemPrompt ?? "",
+      });
+      res.json(created);
+    } catch (err: any) {
+      console.error("POST /api/ai/industries error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
   });
 
-  app.patch("/api/ai/industries/:id", async (req, res) => {
-    const updated = await storage.updateIndustryConfig(
-      req.params.id,
-      req.body || {},
-    );
-    if (!updated) return res.status(404).json({ error: "Not found" });
-    res.json(updated);
+  app.patch("/api/ai/industries/:id", async (req: Request, res: Response) => {
+    try {
+      const updated = await storage.updateIndustryConfig(
+        req.params.id,
+        req.body || {},
+      );
+      if (!updated) return res.status(404).json({ error: "Not found" });
+      res.json(updated);
+    } catch (err: any) {
+      console.error("PATCH /api/ai/industries/:id error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
   });
 
-  // Dashboard API endpoints
-  app.get("/api/dashboard/stats", async (req, res) => {
+  // ---------- Dashboard / admin endpoints ----------
+  app.get("/api/dashboard/stats", async (_req: Request, res: Response) => {
     try {
       const conversations = await storage.getConversations();
       const leads = await storage.getLeads();
-      const commands = await storage.getBotCommands();
 
       const activeConversations = conversations.filter(
         (c) => c.status === "active",
       ).length;
+
+      const today = new Date().toDateString();
       const newLeads = leads.filter((l) => {
-        const today = new Date();
         const leadDate = new Date(l.createdAt || 0);
-        return leadDate.toDateString() === today.toDateString();
+        return leadDate.toDateString() === today;
       }).length;
+
       const ordersToday = leads.filter((l) => {
-        const today = new Date();
         const leadDate = new Date(l.createdAt || 0);
         return (
-          leadDate.toDateString() === today.toDateString() &&
-          l.status === "PAID"
+          leadDate.toDateString() === today &&
+          (l.status || "").toUpperCase() === "PAID"
         );
       }).length;
 
@@ -85,99 +144,108 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ordersToday,
         responseRate: 94.2,
       });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (err: any) {
+      console.error("GET /api/dashboard/stats error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
-  app.get("/api/conversations", async (req, res) => {
+  app.get("/api/conversations", async (_req: Request, res: Response) => {
     try {
       const conversations = await storage.getConversations();
-      res.json(conversations.slice(0, 10)); // Latest 10
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.json(conversations.slice(0, 10));
+    } catch (err: any) {
+      console.error("GET /api/conversations error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
-  app.get("/api/leads", async (req, res) => {
+  app.get("/api/leads", async (_req: Request, res: Response) => {
     try {
       const leads = await storage.getLeads();
       res.json(leads);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (err: any) {
+      console.error("GET /api/leads error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
-  app.get("/api/commands", async (req, res) => {
+  app.get("/api/commands", async (_req: Request, res: Response) => {
     try {
       const commands = await storage.getBotCommands();
-      res.json(commands.slice(0, 10)); // Top 10
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.json(commands.slice(0, 10));
+    } catch (err: any) {
+      console.error("GET /api/commands error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
-  app.get("/api/system-status", async (req, res) => {
+  app.get("/api/system-status", async (_req: Request, res: Response) => {
     try {
       const status = await storage.getSystemStatus();
       res.json(status);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (err: any) {
+      console.error("GET /api/system-status error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
-  app.get("/api/products", async (req, res) => {
+  // Products (in-memory or storage-backed)
+  app.get("/api/products", async (_req: Request, res: Response) => {
     try {
       const products = await storage.getProducts();
       res.json(products);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (err: any) {
+      console.error("GET /api/products error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
-  app.get("/api/products/search", async (req, res) => {
+  app.get("/api/products/search", async (req: Request, res: Response) => {
     try {
-      const query = req.query.q as string;
-      if (!query) {
-        return res.json([]);
-      }
+      const query = String(req.query.q || "");
+      if (!query) return res.json([]);
       const products = await storage.searchProducts(query);
       res.json(products);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (err: any) {
+      console.error("GET /api/products/search error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
   // === AI Assist MVP routes (catalog/pricing/leads/wa/qr) ===
-  app.get("/api/catalog/price/:sku", async (req, res) => {
+  app.get("/api/catalog/price/:sku", async (req: Request, res: Response) => {
     try {
       const sheetId = process.env.PRICES_SHEET_ID as string;
       const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
       if (!sheetId)
         return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
+
       const item = await getPriceBySku(sheetId, range, req.params.sku);
       if (!item) return res.status(404).json({ error: "SKU not found" });
       res.json(item);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message || "Failed" });
+    } catch (err: any) {
+      console.error("GET /api/catalog/price/:sku error", err);
+      res.status(500).json({ error: err.message || "Failed" });
     }
   });
 
-  app.get("/api/catalog/search", async (req, res) => {
+  app.get("/api/catalog/search", async (req: Request, res: Response) => {
     try {
       const q = String(req.query.q || "");
       const sheetId = process.env.PRICES_SHEET_ID as string;
       const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
       if (!sheetId)
         return res.status(400).json({ error: "PRICES_SHEET_ID not set" });
-      const items = await searchProducts(sheetId, range, q);
+      const items = (await searchProducts(sheetId, range, q)) as any[];
       res.json(items);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message || "Failed" });
+    } catch (err: any) {
+      console.error("GET /api/catalog/search error", err);
+      res.status(500).json({ error: err.message || "Failed" });
     }
   });
 
-  app.post("/api/leads", async (req, res) => {
+  app.post("/api/leads", async (req: Request, res: Response) => {
     try {
       const { channel, name, phone, items, sum } = req.body || {};
       const leadId = "ld_" + Date.now();
@@ -196,7 +264,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ]);
       }
 
-      // Store in memory as well
       await storage.createLead({
         leadId,
         channel: channel || "web",
@@ -210,23 +277,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const qr = await generateQrPngBuffer(`pay://${leadId}`);
       res.setHeader("Content-Type", "image/png");
       res.send(qr);
-    } catch (e: any) {
-      res.status(500).json({ error: e.message || "Failed" });
+    } catch (err: any) {
+      console.error("POST /api/leads error", err);
+      res.status(500).json({ error: err.message || "Failed" });
     }
   });
 
-  app.post("/api/payments/qr/callback", async (req, res) => {
-    const sig = req.header("x-signature");
-    if (!sig || sig !== process.env.PAYMENT_CALLBACK_SECRET)
-      return res.status(403).json({ error: "bad signature" });
-    // TODO: mark lead as PAID in Google Sheets by LeadID
-    res.json({ ok: true });
+  app.post("/api/payments/qr/callback", async (req: Request, res: Response) => {
+    try {
+      const sig = req.header("x-signature");
+      if (!sig || sig !== process.env.PAYMENT_CALLBACK_SECRET)
+        return res.status(403).json({ error: "bad signature" });
+      // TODO: mark lead as PAID in Google Sheets by LeadID
+      res.json({ ok: true });
+    } catch (err: any) {
+      console.error("POST /api/payments/qr/callback error", err);
+      res.status(500).json({ error: err.message || "Failed" });
+    }
   });
 
-  app.post("/api/whatsapp/webhook", async (req, res) => {
+  // WhatsApp webhook (360dialog style)
+  app.post("/api/whatsapp/webhook", async (req: Request, res: Response) => {
     try {
       const body = req.body || {};
-      // 360dialog typical payload: { contacts: [...], messages: [{ from, text: { body } }] }
       const msg = (body.messages && body.messages[0]) || null;
       if (!msg) return res.json({ ok: true });
       const from = msg.from || (msg.sender && msg.sender.id);
@@ -243,7 +316,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const wa = getWAClient();
 
-      // Store/update conversation
       await storage.createConversation({
         chatId: from,
         channel: "whatsapp",
@@ -253,7 +325,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status: "active",
       });
 
-      // Commands
       const lower = String(text || "")
         .trim()
         .toLowerCase();
@@ -329,7 +400,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ ok: true });
       }
 
-      // 2GIS and callback keywords
       if (lower.includes("2gis") || lower.includes("навигац")) {
         const url = process.env.TWO_GIS_URL || "https://2gis.kz";
         await wa.sendText(from, url);
@@ -356,12 +426,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ ok: true });
       }
 
-      // AI-powered responses with funnel fallback
+      // AI-powered funnel
       if (!funnelService.has(from)) {
         const first = funnelService.start(from, detectLang(text) as any);
         await wa.sendText(from, first);
       } else {
-        // Try AI response if available, fallback to basic funnel
         try {
           const aiResponse = await funnelService.generateAIResponse(from, text);
           if (aiResponse) {
@@ -370,21 +439,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const reply = funnelService.next(from, text);
             if (reply) await wa.sendText(from, reply);
           }
-        } catch (error) {
-          // Fallback to basic funnel
+        } catch (err) {
           const reply = funnelService.next(from, text);
           if (reply) await wa.sendText(from, reply);
         }
       }
       return res.json({ ok: true });
-    } catch (e: any) {
-      console.error("WA webhook error", e);
-      return res.status(200).json({ ok: true }); // don't retry storms on provider
+    } catch (err: any) {
+      console.error("WA webhook error", err);
+      // не даём провайдеру бесконечные retries — возвращаем 200/ok
+      return res.status(200).json({ ok: true });
     }
   });
 
-  // AI Settings API
-  app.get("/api/ai/settings", async (req, res) => {
+  // AI Settings
+  app.get("/api/ai/settings", async (_req: Request, res: Response) => {
     try {
       const settings = {
         industry: process.env.AI_INDUSTRY || "retail",
@@ -397,60 +466,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
         apiKeySet: !!process.env.OPENAI_API_KEY,
       };
       res.json(settings);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
+    } catch (err: any) {
+      console.error("GET /api/ai/settings error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
     }
   });
 
   // AI Product Recommendations
-  app.post("/api/ai/recommendations", async (req, res) => {
+  app.post("/api/ai/recommendations", async (req: Request, res: Response) => {
     try {
-      const { query } = req.body;
-      if (!query) {
-        return res.status(400).json({ error: "Query is required" });
-      }
+      const { query } = req.body || {};
+      if (!query) return res.status(400).json({ error: "Query is required" });
 
-      // Get products from Google Sheets
       const sheetId = process.env.PRICES_SHEET_ID as string;
       const range = process.env.PRICES_RANGE || "Sheet1!A:Z";
-
-      if (!sheetId) {
+      if (!sheetId)
         return res
           .status(500)
           .json({ error: "Product catalog not configured" });
-      }
 
-      const products = await searchProducts(sheetId, range, query);
+      // Получаем продукты — гарантируем массив
+      const _productsRaw = await searchProducts(sheetId, range, query);
+      const products = Array.isArray(_productsRaw)
+        ? _productsRaw
+        : _productsRaw
+          ? [_productsRaw]
+          : [];
 
-      if (products.length === 0) {
+      // Если ничего не найдено — быстро ответим
+      if (!products.length) {
         return res.json({
           recommendations:
             "К сожалению, по вашему запросу ничего не найдено. Попробуйте уточнить запрос или свяжитесь с нашим менеджером.",
         });
       }
 
-      // Generate AI recommendations
+      // Динамически импортируем генератор рекомендаций и вызываем его
       const { generateProductRecommendations } = await import(
         "./services/openai"
       );
-      const recommendations = await generateProductRecommendations(
-        query,
-        products,
-        {
-          industry: process.env.AI_INDUSTRY,
-          personality: process.env.AI_PERSONALITY,
-          temperature: parseFloat(process.env.AI_TEMPERATURE || "0.7"),
-          maxTokens: parseInt(process.env.AI_MAX_TOKENS || "500"),
-        },
-      );
 
-      res.json({ recommendations, products: products.slice(0, 5) });
-    } catch (error: any) {
-      console.error("AI recommendations error:", error);
-      res.status(500).json({ error: "Failed to generate recommendations" });
+      let recommendations;
+      try {
+        recommendations = await generateProductRecommendations(
+          query,
+          products as unknown as any[], // безопасный cast для TypeScript
+          {
+            industry: process.env.AI_INDUSTRY,
+            personality: process.env.AI_PERSONALITY,
+            temperature: parseFloat(process.env.AI_TEMPERATURE || "0.7"),
+            maxTokens: parseInt(process.env.AI_MAX_TOKENS || "500"),
+          },
+        );
+      } catch (err: any) {
+        console.error("generateProductRecommendations failed:", err);
+        return res
+          .status(500)
+          .json({ error: "Failed to generate recommendations" });
+      }
+
+      // Возвращаем рекомендации и первые 5 продуктов
+      return res.json({ recommendations, products: products.slice(0, 5) });
+    } catch (err: any) {
+      console.error("POST /api/ai/recommendations error", err);
+      return res.status(500).json({ error: "internal_error" });
     }
   });
 
   const httpServer = createServer(app);
   return httpServer;
 }
+
+export default registerRoutes;

@@ -8,14 +8,31 @@ import {
   type Product,
   type InsertProduct,
   type BotCommand,
-  type InsertBotCommand,
+  //type InsertBotCommand,
   type SystemStatus,
-  type InsertSystemStatus,
+  //type InsertSystemStatus,
   type IndustryConfig,
   type InsertIndustryConfig,
-  industryKeys,
+  //industryKeys,
 } from "@shared/schema";
 import { randomUUID } from "crypto";
+
+export type Tenant = {
+  id: string; // nanoid/uuid
+  key: string; // человеко-читаемый ключ (slug)
+  title: string;
+  tgToken?: string;
+  waApiKey?: string;
+  waPhoneId?: string;
+  pricesSheetId?: string;
+  pricesRange?: string;
+  leadsSheetId?: string;
+  leadsRange?: string;
+  callbacksSheetId?: string;
+  callbacksRange?: string;
+  texts?: Record<string, string>;
+  active: boolean;
+};
 
 export interface IStorage {
   // User methods
@@ -68,6 +85,67 @@ export class MemStorage implements IStorage {
 
   private industryConfigs = new Map<string, IndustryConfig>();
 
+  // ✅ новое: список тенантов
+  private tenants: Tenant[] = [
+    {
+      id: "default",
+      key: "default",
+      title: "Default Tenant",
+      tgToken: process.env.TELEGRAM_BOT_TOKEN || "",
+      pricesSheetId: process.env.PRICES_SHEET_ID || "",
+      pricesRange: process.env.PRICES_RANGE || "Sheet1!A:Z",
+      leadsSheetId: process.env.LEADS_SHEET_ID || "",
+      leadsRange: process.env.LEADS_RANGE || "Sheet1!A:Z",
+      callbacksSheetId: process.env.CALLBACKS_SHEET_ID || "",
+      callbacksRange: process.env.CALLBACKS_RANGE || "Sheet1!A:Z",
+      texts: {},
+      active: true,
+    },
+  ];
+  // ✅ методы, которых не хватало
+  async getTenants(): Promise<Tenant[]> {
+    return this.tenants;
+  }
+
+  async getTenantByKey(key: string): Promise<Tenant | undefined> {
+    return this.tenants.find((t) => t.key === key);
+  }
+
+  async createTenant(patch: Partial<Tenant>): Promise<Tenant> {
+    const id =
+      typeof (global as any).crypto?.randomUUID === "function"
+        ? (global as any).crypto.randomUUID()
+        : Date.now().toString();
+
+    const t: Tenant = {
+      id,
+      key: patch.key || `t-${id.slice(-6)}`,
+      title: patch.title || "New Tenant",
+      tgToken: patch.tgToken || "",
+      waApiKey: patch.waApiKey || "",
+      waPhoneId: patch.waPhoneId || "",
+      pricesSheetId: patch.pricesSheetId || "",
+      pricesRange: patch.pricesRange || "Sheet1!A:Z",
+      leadsSheetId: patch.leadsSheetId || "",
+      leadsRange: patch.leadsRange || "Sheet1!A:Z",
+      callbacksSheetId: patch.callbacksSheetId || "",
+      callbacksRange: patch.callbacksRange || "Sheet1!A:Z",
+      texts: patch.texts || {},
+      active: patch.active ?? true,
+    };
+    this.tenants.push(t);
+    return t;
+  }
+
+  async updateTenant(
+    id: string,
+    patch: Partial<Tenant>,
+  ): Promise<Tenant | null> {
+    const idx = this.tenants.findIndex((t) => t.id === id);
+    if (idx === -1) return null;
+    this.tenants[idx] = { ...this.tenants[idx], ...patch };
+    return this.tenants[idx];
+  }
   // ---- AI Industry Configs ----
   async getIndustryConfigs(): Promise<IndustryConfig[]> {
     return Array.from(this.industryConfigs.values());
@@ -106,14 +184,13 @@ export class MemStorage implements IStorage {
     this.systemStatus = new Map();
 
     // --- Seed AI industries ---
-        const seed: InsertIndustryConfig[] = [
-          {
-            key: "dentistry",
-            title: "Стоматология",
-            active: true,
-            usersCount: 24,
-            systemPrompt:
-    `Ты — помощник для создания документов и общения с клиентами в сфере стоматологии.
+    const seed: InsertIndustryConfig[] = [
+      {
+        key: "dentistry",
+        title: "Стоматология",
+        active: true,
+        usersCount: 24,
+        systemPrompt: `Ты — помощник для создания документов и общения с клиентами в сфере стоматологии.
     При создании договоров учитывай специфику медицинских услуг:
     - Указывай необходимые лицензии и сертификаты
     - Включай информацию о гарантийных обязательствах
@@ -125,41 +202,38 @@ export class MemStorage implements IStorage {
     - Стоимость лечения
     - Сроки оказания услуги
     - Гарантийные обязательства`,
-          },
-          {
-            key: "restaurant",
-            title: "Ресторанный бизнес",
-            active: true,
-            usersCount: 18,
-            systemPrompt:
-    `Ты — помощник ресторана. Помогаешь с меню, бронированием, банкетами, поставщиками и актами.
+      },
+      {
+        key: "restaurant",
+        title: "Ресторанный бизнес",
+        active: true,
+        usersCount: 18,
+        systemPrompt: `Ты — помощник ресторана. Помогаешь с меню, бронированием, банкетами, поставщиками и актами.
     Всегда уточняй формат мероприятия, количество гостей, бюджет, тайминг.`,
-          },
-          {
-            key: "construction",
-            title: "Строительство",
-            active: true,
-            usersCount: 31,
-            systemPrompt:
-    `Ты — помощник строительной компании. Договора подряда, ТЗ, акты КС-2/КС-3, технадзор.
+      },
+      {
+        key: "construction",
+        title: "Строительство",
+        active: true,
+        usersCount: 31,
+        systemPrompt: `Ты — помощник строительной компании. Договора подряда, ТЗ, акты КС-2/КС-3, технадзор.
     Учитывай СНИПы, сроки, гарантию и риски.`,
-          },
-          {
-            key: "legal",
-            title: "Юридические услуги",
-            active: true,
-            usersCount: 12,
-            systemPrompt:
-    `Ты — ассистент юрфирмы. Брифуешь клиента, формируешь договор, доверенность, претензии.
+      },
+      {
+        key: "legal",
+        title: "Юридические услуги",
+        active: true,
+        usersCount: 12,
+        systemPrompt: `Ты — ассистент юрфирмы. Брифуешь клиента, формируешь договор, доверенность, претензии.
     Уточняй юрисдикцию, сроки и бюджет.`,
-          },
-        ];
+      },
+    ];
 
-        seed.forEach((s) => {
-          const id = randomUUID();
-          this.industryConfigs.set(id, { id, ...s });
-        });
-    
+    seed.forEach((s) => {
+      const id = randomUUID();
+      this.industryConfigs.set(id, { id, ...s });
+    });
+
     // Initialize with some system status entries
     this.initializeSystemStatus();
   }
@@ -367,25 +441,27 @@ export class MemStorage implements IStorage {
 
   async updateSystemStatus(
     serviceName: string,
-    status: string,
+    status: "online" | "offline" | "degraded",
     description?: string,
   ): Promise<void> {
     const existing = this.systemStatus.get(serviceName);
     if (existing) {
       existing.status = status;
       existing.lastCheck = new Date();
-      if (description) existing.description = description;
-    } else {
-      const newStatus: SystemStatus = {
-        id: randomUUID(),
-        serviceName,
-        status,
-        description: description || null,
-        lastCheck: new Date(),
-      };
-      this.systemStatus.set(serviceName, newStatus);
+      if (typeof description === "string") {
+        existing.description = description;
+      }
+      return;
     }
+
+    const newStatus: SystemStatus = {
+      id: randomUUID(),
+      serviceName,
+      status,
+      description: typeof description === "string" ? description : null,
+      lastCheck: new Date(),
+    };
+    this.systemStatus.set(serviceName, newStatus);
   }
 }
-
 export const storage = new MemStorage();

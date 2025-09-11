@@ -1,0 +1,387 @@
+отлично. кидаю «боевой» промпт для Replit Agent — с конкретными путями файлов, вставками «откуда-до-куда», новыми файлами и миграциями. Его задача: **изменить текущий проект** под новое ТЗ: мультиарендность, чистый диалог (текст/голос/картинки), ASR/TTS, хранение в Google Drive/Sheets, админ-настройки агентов, вебхуки TG/WA. (Содержимое синхронизировано с последним ТЗ и «Новое течение ТЗ.docx».)&#x20;
+
+---
+
+# MASTER-PROMPT ДЛЯ REPLIT AGENT
+
+(вставь целиком; агент должен ПРИМЕНИТЬ ПРАВКИ в текущем репозитории)
+
+Ты — Replit Agent, старший разработчик/архитектор. Проект: Node/TypeScript (server + client). Применяй правки инкрементально с понятными коммитами. Не ломай совместимость. Где выбор — предпочитай простоту.
+
+## 0) Общие правила
+
+* Всегда после правок: `npm i` → `npm run build` → `npm run dev` (или существующие скрипты). Чини ошибки сборки/типов сразу.
+* Убрать пользовательские **кнопки/клавиатуры** в диалоге. Общение только текст/голос/картинки.
+* Язык ответа = язык входа (RU/KZ авто). Если вход голосом — ответ +TTS-аудио (и короткий текст-дубликат).
+* LLM: только форматировать/объяснять на основе каталога/материалов; **не выдумывать** цены/наличие.
+* В финале: создать `docugenius_multitenant_dialog_patch.patch`, обновить `README.md`, добавить `.env.example`.
+
+---
+
+## 1) ENV и зависимости
+
+### 1.1 Добавь/обнови `.env.example`
+
+```
+DATABASE_URL=
+TG_WEBHOOK_BASE=
+OPENAI_API_KEY=
+ASR_PROVIDER=whisper
+TTS_PROVIDER=azure|gcp|elevenlabs
+GOOGLE_JSON_BASE64=
+GDRIVE_ROOT_FOLDER=
+WA_PROVIDER=360dialog|cloud
+WA_API_URL=
+WA_API_KEY=
+WA_PHONE_NUMBER_ID=
+PAYMENT_CALLBACK_SECRET=
+ADMIN_EMAIL=
+```
+
+### 1.2 Обнови `package.json` (если отсутствуют)
+
+Добавь зависимости: `"drizzle-orm"`, `"pg"`, `"pgvector"` (если надо), `"googleapis"`, `"form-data"`, `"multer"`, `"qrcode"`.
+Dev: `"drizzle-kit"`, типы для node/express/telegram/whatsapp.
+Скрипты:
+
+```json
+"scripts": {
+  "db:generate": "drizzle-kit generate",
+  "db:migrate": "drizzle-kit migrate",
+  "dev": "tsx server/index.ts"
+}
+```
+
+---
+
+## 2) Слой БД (Drizzle + Postgres) — мультиарендность
+
+### 2.1 Создай файл `server/db/schema.ts` (новый)
+
+```ts
+// server/db/schema.ts
+import { pgTable, serial, text, integer, numeric, timestamp, jsonb, date } from "drizzle-orm/pg-core";
+
+export const tenants = pgTable("tenants", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull(),            // url-safe tenant key
+  title: text("title").notNull(),
+  tgToken: text("tg_token"),
+  waPhoneId: text("wa_phone_id"),
+  waApiKey: text("wa_api_key"),
+  gdriveFolderId: text("gdrive_folder_id"),
+  locale: text("locale").default("ru"),
+  currency: text("currency").default("KZT"),
+  pricePolicy: text("price_policy").default("retail"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const catalogs = pgTable("catalogs", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id),
+  sku: text("sku").notNull(),
+  name: text("name").notNull(),
+  brand: text("brand"),
+  category: text("category"),
+  unit: text("unit").default("шт"),
+  price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+  stock: integer("stock").default(0),
+  packQty: integer("pack_qty").default(1),
+  warehouse: text("warehouse"),
+  leadTimeDays: integer("lead_time_days").default(0),
+  photoUrl: text("photo_url"),
+  description: text("description"),
+  attrs: jsonb("attrs"),
+  searchable: text("searchable") // tsvector через миграцию
+});
+
+export const customers = pgTable("customers", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id),
+  chatId: text("chat_id").notNull(),
+  channel: text("channel").notNull(), // "tg" | "wa"
+  phone: text("phone"),
+  name: text("name"),
+  type: text("type").default("b2c"),   // b2b|b2c
+  bin: text("bin"),
+  email: text("email"),
+});
+
+export const carts = pgTable("carts", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id),
+  customerId: integer("customer_id").references(() => customers.id),
+  status: text("status").default("open"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const cartItems = pgTable("cart_items", {
+  id: serial("id").primaryKey(),
+  cartId: integer("cart_id").notNull().references(() => carts.id),
+  sku: text("sku").notNull(),
+  qty: integer("qty").notNull(),
+  price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+});
+
+export const orders = pgTable("orders", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id),
+  customerId: integer("customer_id").references(() => customers.id),
+  total: numeric("total", { precision: 12, scale: 2 }).default("0"),
+  status: text("status").default("draft"),
+  delivery: text("delivery"),
+  payment: text("payment"),
+  meta: jsonb("meta")
+});
+
+export const leads = pgTable("leads", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id),
+  customerId: integer("customer_id").notNull().references(() => customers.id),
+  needByDate: date("need_by_date"),
+  comment: text("comment"),
+  fileUrl: text("file_url"),
+});
+
+export const texts = pgTable("texts", {
+  id: serial("id").primaryKey(),
+  tenantId: integer("tenant_id").notNull().references(() => tenants.id),
+  key: text("key").notNull(),
+  value: text("value").notNull(),
+});
+```
+
+### 2.2 Создай `server/db/index.ts`
+
+```ts
+// server/db/index.ts
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Client } from "pg";
+export const client = new Client({ connectionString: process.env.DATABASE_URL! });
+await client.connect();
+export const db = drizzle(client);
+```
+
+### 2.3 Миграции
+
+Создай миграции для таблиц выше и индексов:
+
+* GIN по `catalogs.searchable` (tsvector name/description/brand).
+* `pg_trgm` индекс по `name`/`brand` для опечаток.
+
+---
+
+## 3) Сервисы ввода/вывода (ASR, TTS, Normalizer, NLU, Orchestrator)
+
+### 3.1 Добавь `server/services/normalizer.ts` (новый)
+
+```ts
+export type NormalizedMessage = {
+  tenantKey: string;
+  chatId: string;
+  channel: "tg"|"wa";
+  lang: "ru"|"kk";
+  kind: "text"|"voice"|"audio"|"image";
+  text?: string;
+  mediaUrl?: string;
+};
+export async function normalizeIncoming(req: any): Promise<NormalizedMessage> {
+  // распарсить webhook TG/WA → определить tenantKey, channel, chatId, kind, text/mediaUrl
+  // детект языка (ru/kk) по тексту; для голоса заполним позже после ASR
+  // вернуть NormalizedMessage
+  return {} as any;
+}
+```
+
+### 3.2 Добавь `server/services/asr.ts` (новый)
+
+```ts
+export async function transcribeAudio(urlOrBuffer: string|Buffer, langHint?: "ru"|"kk"): Promise<string> {
+  // Whisper API/GCP — получить текст
+  return "";
+}
+```
+
+### 3.3 Добавь `server/services/tts.ts` (новый)
+
+```ts
+export async function synthesizeSpeech(text: string, lang: "ru"|"kk"): Promise<Buffer> {
+  // Azure/GCP/ElevenLabs — вернуть аудио-буфер
+  return Buffer.from([]);
+}
+```
+
+### 3.4 Добавь `server/nlu/intents.ts` (новый)
+
+```ts
+export type Parsed = { intent: string; entities: Record<string, any>; };
+export function parseUtterance(input: string, lang: "ru"|"kk"): Parsed {
+  // правила для: search, add_to_cart, show_cart, remove/clear, checkout, quote, invoice, delivery/info, promo, address, callback, help, stop, unknown
+  // распознать qty/sku/name простыми регекспами и словарями единиц
+  return { intent: "unknown", entities: {} };
+}
+```
+
+### 3.5 Добавь `server/dialog/orchestrator.ts` (новый)
+
+```ts
+import { parseUtterance } from "../nlu/intents";
+export async function handleDialog(ctx: {msg: any, customerId: number, tenantId: number}) {
+  // FSM + воронка 3 слотов: purpose/volume/budget → deadline/conditions
+  // если слот пуст — задаём уточняющий вопрос
+  // по intents вызываем Catalog/Cart/Leads/Docs сервисы
+  // возвращаем { text: string, tts?: Buffer, attachments?: Array<{type:"image"|"file", url:string}> }
+  return { text: "..." };
+}
+```
+
+---
+
+## 4) Webhooks и маршруты
+
+### 4.1 Редактируй `server/routes.ts`
+
+**НАЙТИ блок регистрации маршрутов и ДОБАВИТЬ:**
+
+```ts
+// Telegram webhook
+app.post("/webhook/tg/:tenantKey", async (req, res) => {
+  // normalizeIncoming → ASR (если voice/audio) → orchestrator → отправка ответа (text + voice при необходимости)
+  res.sendStatus(200);
+});
+
+// WhatsApp webhook
+app.post("/webhook/wa", async (req, res) => {
+  // resolve tenant by phone_id/metadata → normalizeIncoming → ASR → orchestrator → ответ
+  res.sendStatus(200);
+});
+
+// Catalog
+app.get("/api/catalog/search", async (req, res) => { /* q, tenant → FTS+trgm */ });
+app.get("/api/catalog/sku/:sku", async (req, res) => { /* sku, tenant */ });
+
+// Cart/Order/Lead
+app.post("/api/cart/add", async (req, res) => { /* {tenant, chat_id, sku, qty} */ });
+app.get("/api/cart", async (req, res) => { /* {tenant, chat_id} */ });
+app.post("/api/order/checkout", async (req, res) => { /* оформление */ });
+app.post("/api/lead", async (req, res) => { /* создание лида */ });
+
+// Docs
+app.post("/api/docs/quote", async (req, res) => { /* DOCX→PDF→GDrive → ссылка */ });
+app.post("/api/docs/invoice", async (req, res) => { /* счёт */ });
+```
+
+---
+
+## 5) Telegram/WhatsApp слои
+
+### 5.1 Измени `server/services/telegramBot.ts`
+
+* УДАЛИ/ОТКЛЮЧИ reply-клавиатуры и инлайн-кнопки в клиентском диалоге.
+* Добавь обработку **voice/audio/document(audio/\*)/image** → пересылай в `normalizeIncoming`/`ASR`.
+* Отправка ответов: всегда текст; если вход был голосом — дополнительно прикрепляй voice/audio (из `tts` буфера).
+
+**ЗАМЕНИ участок «клавиатуры/команды» НА:**
+
+```ts
+// Вместо меню/кнопок: свободный текст
+bot.on("message", async (msg) => {
+  // route → normalizeIncoming({ channel:"tg", ... })
+  // ASR (если voice/audio)
+  // handleDialog → ответ
+});
+```
+
+### 5.2 Добавь/проверь WA клиент (`server/integrations/whatsapp/*`)
+
+* Отправка текста/аудио/фото; при заказе — изображение QR или ссылка на документ в GDrive.
+
+---
+
+## 6) Catalog/Docs/Drive
+
+### 6.1 Создай `server/services/catalog.ts`
+
+```ts
+export async function searchCatalog(tenantId:number, q:string, limit=20){ /* FTS+trgm */ }
+export async function getBySku(tenantId:number, sku:string){ /* ... */ }
+```
+
+### 6.2 Создай `server/services/docs.ts`
+
+```ts
+export async function makeQuotePdf(tenantId:number, data:any): Promise<{fileUrl:string}> { /* DOCX→PDF→GDrive */ }
+export async function makeInvoicePdf(tenantId:number, data:any): Promise<{fileUrl:string}> { /* ... */ }
+```
+
+### 6.3 Создай `server/integrations/google/drive.ts`
+
+```ts
+export async function uploadToDrive(tenantId:number, name:string, mime:string, buf:Buffer): Promise<string> {
+  // авторизация сервис-аккаунтом, загрузка в папку тенанта, вернуть public/drive link
+  return "";
+}
+```
+
+---
+
+## 7) Admin-панель (минимум, сервер)
+
+### 7.1 Роуты админки
+
+Добавь:
+
+```
+GET/POST/PATCH /api/tenants
+POST /admin/catalog/import
+GET /admin/leads
+GET /admin/orders
+POST /admin/texts
+```
+
+Аутентификация (passport-local), роли (admin/manager). Импорт CSV/XLSX → upsert в `catalogs`.
+
+---
+
+## 8) NLU-правила и воронка (важно)
+
+* Интенты: `search, add_to_cart, show_cart, remove/clear, checkout, quote, invoice, delivery/info, promo, address, callback, help, stop, unknown`.
+* Слоты воронки: `purpose` → `volumeOrBudget` → `deadlineOrConditions`.
+* **Правило ответа:** кратко, на языке клиента; 2–3 релевантных товара; CTA в виде текста («напишите: `добавь <SKU> 5 шт`»).
+* Запрет на генерацию цен/наличия вне Catalog API.
+
+---
+
+## 9) Безопасность/операции
+
+* Все DAO/запросы — только в рамках `tenantId`.
+* Логи — без PII; рейт-лимит per chat/per tenant.
+* Health-checks `/healthz` для API/DB/GDrive.
+
+---
+
+## 10) Тесты/приёмка (smoke/E2E)
+
+1. Текст: поиск → «добавь 5 шт» → корзина → `checkout` → `quote` → ссылка из GDrive.
+2. Голос: голосовой запрос → ответ голосом + текст → добавление в корзину.
+3. Импорт каталога 10k+ строк → поиск с опечатками.
+4. Два разных `tenant` → изоляция данных и токенов.
+5. Admin: создать тенанта, настроить GDrive/Sheets/CRM/Payments; выполнить пробные действия.
+
+---
+
+## 11) Что выдать в конце
+
+* `docugenius_multitenant_dialog_patch.patch`
+* миграции Drizzle + `npm run db:migrate`
+* `.env.example` полный
+* обновлённый `README.md` (вебхуки, env, сборка)
+* `CHANGELOG.md` с перечнем правок
+
+---
+
+Если часть модулей уже есть — **аккуратно заменяй только отмеченные фрагменты** («ЗАМЕНИ участок…», «ДОБАВЬ…»). После каждого большого шага — сборка и быстрый прогон smoke-тестов.
+
+---
+
+Хочешь — следующим шагом я подготовлю готовые **миграции Drizzle и каркас кода** для файлов выше (чтобы агенту можно было вставлять блоки «как есть», без додумываний).
