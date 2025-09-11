@@ -1,6 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
+import * as React from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Settings, Users, Globe, Key, Database, Bot, Save } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+import { Plus, Settings, Users, Globe, Key, Database, Bot, Save, Edit } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +21,17 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormDescription,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
+import { useI18n } from "@/contexts/i18n-context";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface Tenant {
@@ -38,17 +52,80 @@ interface Tenant {
   active: boolean;
 }
 
+interface IndustryConfig {
+  id: string;
+  key: string;
+  title: string;
+  active: boolean;
+  usersCount: number;
+  systemPrompt: string;
+}
+
+interface IndustryConfigsResponse {
+  items: IndustryConfig[];
+  stats: {
+    configured: number;
+    active: number;
+    totalUsers: number;
+  };
+}
+
+const settingsSchema = z.object({
+  webhookTimeout: z.coerce.number().min(1000).max(30000),
+  maxRetries: z.coerce.number().min(0).max(10),
+  logLevel: z.enum(["info", "debug", "error"]),
+  debugMode: z.boolean(),
+});
+
+type SettingsFormData = z.infer<typeof settingsSchema>;
+
 export default function TenantsPage() {
   const { toast } = useToast();
+  const { t } = useI18n();
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("tenants");
+  const [isEditPromptDialogOpen, setIsEditPromptDialogOpen] = useState(false);
+  const [selectedIndustryConfig, setSelectedIndustryConfig] = useState<IndustryConfig | null>(null);
+  const [editPromptText, setEditPromptText] = useState("");
 
   const { data: tenants, isLoading } = useQuery<Tenant[]>({
     queryKey: ['/api/tenants'],
     refetchInterval: 30000,
   });
+
+  const { data: industryConfigs, isLoading: isLoadingIndustries } = useQuery<IndustryConfigsResponse>({
+    queryKey: ['/api/ai/industries'],
+    refetchInterval: 30000,
+  });
+
+  const { data: settings, isLoading: isLoadingSettings } = useQuery({
+    queryKey: ['/api/ai/settings'],
+    refetchInterval: 30000,
+  });
+
+  const settingsForm = useForm<SettingsFormData>({
+    resolver: zodResolver(settingsSchema),
+    defaultValues: {
+      webhookTimeout: settings?.webhookTimeout || 5000,
+      maxRetries: settings?.maxRetries || 3,
+      logLevel: settings?.logLevel || "info",
+      debugMode: settings?.debugMode || false,
+    },
+  });
+
+  // Reset form when settings data loads
+  React.useEffect(() => {
+    if (settings) {
+      settingsForm.reset({
+        webhookTimeout: settings.webhookTimeout || 5000,
+        maxRetries: settings.maxRetries || 3,
+        logLevel: settings.logLevel || "info",
+        debugMode: settings.debugMode || false,
+      });
+    }
+  }, [settings, settingsForm]);
 
   const createMutation = useMutation({
     mutationFn: async (data: Partial<Tenant>) => {
@@ -64,14 +141,14 @@ export default function TenantsPage() {
       queryClient.invalidateQueries({ queryKey: ['/api/tenants'] });
       setIsCreateDialogOpen(false);
       toast({
-        title: "Успешно",
-        description: "Тенант создан",
+        title: t('toast.success'),
+        description: t('toast.tenantCreated'),
       });
     },
     onError: () => {
       toast({
-        title: "Ошибка",
-        description: "Не удалось создать тенанта",
+        title: t('toast.error'),
+        description: t('toast.tenantCreateFailed'),
         variant: "destructive",
       });
     },
@@ -92,14 +169,14 @@ export default function TenantsPage() {
       setIsEditDialogOpen(false);
       setSelectedTenant(null);
       toast({
-        title: "Успешно",
-        description: "Тенант обновлен",
+        title: t('toast.success'),
+        description: t('toast.tenantUpdated'),
       });
     },
     onError: () => {
       toast({
-        title: "Ошибка",
-        description: "Не удалось обновить тенанта",
+        title: t('toast.error'),
+        description: t('toast.tenantUpdateFailed'),
         variant: "destructive",
       });
     },
@@ -116,14 +193,86 @@ export default function TenantsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/tenants'] });
       toast({
-        title: "Успешно",
-        description: "Тенант удален",
+        title: t('toast.success'),
+        description: t('toast.tenantDeleted'),
       });
     },
     onError: () => {
       toast({
-        title: "Ошибка",
-        description: "Не удалось удалить тенанта",
+        title: t('toast.error'),
+        description: t('toast.tenantDeleteFailed'),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const toggleIndustryMutation = useMutation({
+    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
+      return apiRequest(`/api/ai/industries/${id}`, {
+        method: 'PATCH',
+        body: { active },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/ai/industries'] });
+      toast({
+        title: t('toast.success'),
+        description: t('toast.configUpdated'),
+      });
+    },
+    onError: () => {
+      toast({
+        title: t('toast.error'),
+        description: t('toast.configUpdateFailed'),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updatePromptMutation = useMutation({
+    mutationFn: async ({ id, systemPrompt }: { id: string; systemPrompt: string }) => {
+      return apiRequest(`/api/ai/industries/${id}`, {
+        method: 'PATCH',
+        body: { systemPrompt },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/ai/industries'] });
+      setIsEditPromptDialogOpen(false);
+      setSelectedIndustryConfig(null);
+      setEditPromptText("");
+      toast({
+        title: t('toast.success'),
+        description: t('toast.promptUpdated'),
+      });
+    },
+    onError: () => {
+      toast({
+        title: t('toast.error'),
+        description: t('toast.promptUpdateFailed'),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: async (data: SettingsFormData) => {
+      return apiRequest('/api/ai/settings', {
+        method: 'PATCH',
+        body: data,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/ai/settings'] });
+      toast({
+        title: t('toast.success'),
+        description: t('toast.settingsUpdated'),
+      });
+    },
+    onError: () => {
+      toast({
+        title: t('toast.error'),
+        description: t('toast.settingsUpdateFailed'),
         variant: "destructive",
       });
     },
@@ -166,14 +315,37 @@ export default function TenantsPage() {
     setIsEditDialogOpen(true);
   };
 
+  const handleToggleIndustry = (industry: IndustryConfig, active: boolean) => {
+    toggleIndustryMutation.mutate({ id: industry.id, active });
+  };
+
+  const openEditPromptDialog = (industry: IndustryConfig) => {
+    setSelectedIndustryConfig(industry);
+    setEditPromptText(industry.systemPrompt || "");
+    setIsEditPromptDialogOpen(true);
+  };
+
+  const handleSavePrompt = () => {
+    if (selectedIndustryConfig) {
+      updatePromptMutation.mutate({
+        id: selectedIndustryConfig.id,
+        systemPrompt: editPromptText,
+      });
+    }
+  };
+
+  const handleSettingsSubmit = (data: SettingsFormData) => {
+    updateSettingsMutation.mutate(data);
+  };
+
   if (isLoading) {
     return (
       <div className="p-4 lg:p-6 space-y-6 w-full">
         <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+          <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded w-1/4"></div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => (
-              <div key={i} className="h-48 bg-gray-200 rounded"></div>
+              <div key={i} className="h-48 bg-gray-200 dark:bg-gray-700 rounded"></div>
             ))}
           </div>
         </div>
@@ -185,9 +357,9 @@ export default function TenantsPage() {
     <div className="p-4 lg:p-6 space-y-6 w-full">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-semibold">System Management</h1>
+          <h1 className="text-2xl font-semibold">{t('tenants.title')}</h1>
           <p className="text-muted-foreground">
-            Manage tenants, settings, and AI configuration
+            {t('tenants.subtitle')}
           </p>
         </div>
         <Button
@@ -195,7 +367,7 @@ export default function TenantsPage() {
           data-testid="button-create-tenant"
         >
           <Plus className="w-4 h-4 mr-2" />
-          Create Tenant
+{t('tenants.createTenant')}
         </Button>
       </div>
 
@@ -203,15 +375,15 @@ export default function TenantsPage() {
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="tenants" className="flex items-center gap-2">
             <Users className="w-4 h-4" />
-            Tenants
+{t('tenants.tabs.tenants')}
           </TabsTrigger>
           <TabsTrigger value="settings" className="flex items-center gap-2">
             <Settings className="w-4 h-4" />
-            Settings
+            {t('tenants.tabs.settings')}
           </TabsTrigger>
           <TabsTrigger value="ai-config" className="flex items-center gap-2">
             <Bot className="w-4 h-4" />
-            AI Configuration
+            {t('tenants.tabs.aiConfig')}
           </TabsTrigger>
         </TabsList>
 
@@ -221,7 +393,7 @@ export default function TenantsPage() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Всего тенантов</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('stats.totalTenants')}</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -231,7 +403,7 @@ export default function TenantsPage() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Активные</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('stats.activeTenants')}</CardTitle>
             <Globe className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -243,7 +415,7 @@ export default function TenantsPage() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Telegram боты</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('stats.telegramBots')}</CardTitle>
             <Key className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -255,7 +427,7 @@ export default function TenantsPage() {
         
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">WhatsApp боты</CardTitle>
+            <CardTitle className="text-sm font-medium">{t('stats.whatsappBots')}</CardTitle>
             <Database className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
@@ -274,9 +446,9 @@ export default function TenantsPage() {
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">{tenant.title}</CardTitle>
                 {tenant.active ? (
-                  <Badge variant="default">Активен</Badge>
+                  <Badge variant="default">{t('status.active')}</Badge>
                 ) : (
-                  <Badge variant="secondary">Неактивен</Badge>
+                  <Badge variant="secondary">{t('status.inactive')}</Badge>
                 )}
               </div>
               <p className="text-sm text-muted-foreground">
@@ -476,25 +648,268 @@ export default function TenantsPage() {
         <TabsContent value="settings" className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>Global Settings</CardTitle>
+              <CardTitle>System Settings</CardTitle>
+              <p className="text-sm text-muted-foreground">Configure global system parameters</p>
             </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">Settings configuration coming soon...</p>
+            <CardContent className="space-y-4">
+              {isLoadingSettings ? (
+                <div className="space-y-4">
+                  <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                  <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                  <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                </div>
+              ) : (
+                <Form {...settingsForm}>
+                  <form onSubmit={settingsForm.handleSubmit(handleSettingsSubmit)} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <FormField
+                        control={settingsForm.control}
+                        name="webhookTimeout"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Webhook Timeout (ms)</FormLabel>
+                            <FormControl>
+                              <Input 
+                                {...field} 
+                                type="number" 
+                                placeholder="5000" 
+                                data-testid="input-webhook-timeout" 
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Timeout for webhook requests in milliseconds (1000-30000)
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={settingsForm.control}
+                        name="maxRetries"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Max Retries</FormLabel>
+                            <FormControl>
+                              <Input 
+                                {...field} 
+                                type="number" 
+                                placeholder="3" 
+                                data-testid="input-max-retries" 
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Maximum number of retry attempts (0-10)
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={settingsForm.control}
+                        name="logLevel"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Log Level</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-log-level">
+                                  <SelectValue placeholder="Select log level" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="info">Info</SelectItem>
+                                <SelectItem value="debug">Debug</SelectItem>
+                                <SelectItem value="error">Error</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <FormDescription>
+                              Set the application log level
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={settingsForm.control}
+                        name="debugMode"
+                        render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                              <FormLabel>Debug Mode</FormLabel>
+                              <FormDescription>
+                                Enable detailed debugging and logging
+                              </FormDescription>
+                            </div>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                                data-testid="switch-debug-mode"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                    
+                    <Button 
+                      type="submit" 
+                      disabled={updateSettingsMutation.isPending}
+                      data-testid="button-save-settings"
+                    >
+                      <Save className="w-4 h-4 mr-2" />
+                      {updateSettingsMutation.isPending ? "Saving..." : "Save Settings"}
+                    </Button>
+                  </form>
+                </Form>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
 
         <TabsContent value="ai-config" className="space-y-6">
+          {/* Stats Overview */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Industries</CardTitle>
+                <Bot className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold" data-testid="text-total-industries">
+                  {industryConfigs?.items?.length || 0}
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Active Industries</CardTitle>
+                <Settings className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold" data-testid="text-active-industries">
+                  {industryConfigs?.stats?.active || 0}
+                </div>
+              </CardContent>
+            </Card>
+            
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Users</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold" data-testid="text-total-users">
+                  {industryConfigs?.stats?.totalUsers || 0}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
           <Card>
             <CardHeader>
-              <CardTitle>AI Configuration</CardTitle>
+              <CardTitle>Industry Configurations</CardTitle>
+              <p className="text-sm text-muted-foreground">Manage AI prompts and settings for different industries</p>
             </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground">AI configuration coming soon...</p>
+            <CardContent className="space-y-4">
+              {isLoadingIndustries ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="h-32 bg-gray-200 dark:bg-gray-700 rounded animate-pulse"></div>
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {industryConfigs?.items?.map((industry) => (
+                    <Card key={industry.id} className="relative">
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm" data-testid={`text-industry-title-${industry.key}`}>
+                            {industry.title}
+                          </CardTitle>
+                          <Badge variant={industry.active ? "default" : "secondary"} data-testid={`badge-industry-status-${industry.key}`}>
+                            {industry.active ? "Active" : "Inactive"}
+                          </Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground" data-testid={`text-industry-users-${industry.key}`}>
+                          {industry.usersCount} users
+                        </p>
+                      </CardHeader>
+                      <CardContent className="pt-2">
+                        <div className="flex items-center justify-between">
+                          <Switch 
+                            checked={industry.active}
+                            onCheckedChange={(checked) => handleToggleIndustry(industry, checked)}
+                            disabled={toggleIndustryMutation.isPending}
+                            data-testid={`switch-industry-${industry.key}`}
+                          />
+                          <Button 
+                            variant="outline" 
+                            size="sm"
+                            onClick={() => openEditPromptDialog(industry)}
+                            data-testid={`button-edit-prompt-${industry.key}`}
+                          >
+                            <Edit className="w-3 h-3 mr-1" />
+                            Edit Prompt
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )) || []}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Edit Prompt Dialog */}
+      <Dialog open={isEditPromptDialogOpen} onOpenChange={setIsEditPromptDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle data-testid="dialog-title-edit-prompt">
+              Edit AI Prompt: {selectedIndustryConfig?.title}
+            </DialogTitle>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="system-prompt">System Prompt</Label>
+              <Textarea
+                id="system-prompt"
+                value={editPromptText}
+                onChange={(e) => setEditPromptText(e.target.value)}
+                placeholder="Enter the system prompt for this industry..."
+                className="min-h-[300px] font-mono text-sm"
+                data-testid="textarea-edit-prompt"
+              />
+              <p className="text-sm text-muted-foreground">
+                Define how the AI should behave and respond for the {selectedIndustryConfig?.title} industry.
+              </p>
+            </div>
+          </div>
+          
+          <DialogFooter>
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => setIsEditPromptDialogOpen(false)}
+              data-testid="button-cancel-edit-prompt"
+            >
+              Cancel
+            </Button>
+            <Button 
+              onClick={handleSavePrompt}
+              disabled={updatePromptMutation.isPending}
+              data-testid="button-save-prompt"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              {updatePromptMutation.isPending ? "Saving..." : "Save Prompt"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

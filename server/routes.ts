@@ -895,10 +895,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         smartRecommendations: process.env.AI_SMART_RECOMMENDATIONS !== "false",
         model: process.env.OPENAI_MODEL || "gpt-4o-mini",
         apiKeySet: !!process.env.OPENAI_API_KEY,
+        // System settings
+        webhookTimeout: parseInt(process.env.WEBHOOK_TIMEOUT || "5000"),
+        maxRetries: parseInt(process.env.MAX_RETRIES || "3"),
+        logLevel: process.env.LOG_LEVEL || "info",
+        debugMode: process.env.DEBUG_MODE === "true",
       };
       res.json(settings);
     } catch (err: any) {
       console.error("GET /api/ai/settings error", err);
+      res.status(500).json({ error: err.message || "internal_error" });
+    }
+  });
+
+  app.patch("/api/ai/settings", async (req: Request, res: Response) => {
+    try {
+      const { webhookTimeout, maxRetries, logLevel, debugMode } = req.body;
+      
+      // In a real app, you'd save these to a database or configuration store
+      // For now, we'll just simulate the save and return success
+      // These would typically be saved to the storage or environment config
+      const updatedSettings = {
+        webhookTimeout: webhookTimeout || parseInt(process.env.WEBHOOK_TIMEOUT || "5000"),
+        maxRetries: maxRetries || parseInt(process.env.MAX_RETRIES || "3"),
+        logLevel: logLevel || process.env.LOG_LEVEL || "info",
+        debugMode: debugMode !== undefined ? debugMode : process.env.DEBUG_MODE === "true",
+      };
+      
+      // TODO: Implement actual persistence to storage/database
+      console.log('[PATCH /api/ai/settings] Updated settings:', updatedSettings);
+      
+      res.json({ success: true, settings: updatedSettings });
+    } catch (err: any) {
+      console.error("PATCH /api/ai/settings error", err);
       res.status(500).json({ error: err.message || "internal_error" });
     }
   });
