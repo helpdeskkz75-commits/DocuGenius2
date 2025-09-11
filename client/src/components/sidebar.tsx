@@ -22,8 +22,6 @@ const navigation = [
   { name: "Catalog", href: "/catalog", icon: Package },
   { name: "Payments", href: "/payments", icon: QrCode },
   { name: "Analytics", href: "/analytics", icon: BarChart3 },
-  { name: "ИИ Конфигурация", href: "/ai-config", icon: Bot },
-  { name: "Settings", href: "/settings", icon: Settings },
   { name: "Test", href: "/test", icon: TestTube },
 ];
 

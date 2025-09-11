@@ -1,12 +1,15 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Settings, Users, Globe, Key, Database } from "lucide-react";
+import { Plus, Settings, Users, Globe, Key, Database, Bot, Save } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -40,6 +43,7 @@ export default function TenantsPage() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState("tenants");
 
   const { data: tenants, isLoading } = useQuery<Tenant[]>({
     queryKey: ['/api/tenants'],
@@ -181,9 +185,9 @@ export default function TenantsPage() {
     <div className="p-4 lg:p-6 space-y-6 w-full">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-semibold">Управление тенантами</h1>
+          <h1 className="text-2xl font-semibold">System Management</h1>
           <p className="text-muted-foreground">
-            Настройка и управление мульти-тенантными конфигурациями
+            Manage tenants, settings, and AI configuration
           </p>
         </div>
         <Button
@@ -191,9 +195,27 @@ export default function TenantsPage() {
           data-testid="button-create-tenant"
         >
           <Plus className="w-4 h-4 mr-2" />
-          Добавить тенанта
+          Create Tenant
         </Button>
       </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="tenants" className="flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            Tenants
+          </TabsTrigger>
+          <TabsTrigger value="settings" className="flex items-center gap-2">
+            <Settings className="w-4 h-4" />
+            Settings
+          </TabsTrigger>
+          <TabsTrigger value="ai-config" className="flex items-center gap-2">
+            <Bot className="w-4 h-4" />
+            AI Configuration
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="tenants" className="space-y-6">
 
       {/* Stats Overview */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -448,6 +470,31 @@ export default function TenantsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+        </TabsContent>
+
+        <TabsContent value="settings" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Global Settings</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">Settings configuration coming soon...</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="ai-config" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>AI Configuration</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">AI configuration coming soon...</p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

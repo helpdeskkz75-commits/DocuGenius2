@@ -55,7 +55,7 @@ function getCustomerChatId(customerId: number, tenantId: number): string {
 
 async function handleFunnel(text: string, customerId: number, tenantId: number, lang: "ru"|"kk") {
   const chatId = getCustomerChatId(customerId, tenantId);
-  const funnelLang = (lang === "kk" || lang === "kz") ? "kz" : "ru"; // Convert to funnel service lang format
+  const funnelLang = (lang === "kk" || (lang as any) === "kz") ? "kz" : "ru"; // Convert to funnel service lang format
   
   // Check if funnel session exists
   if (!funnelService.has(chatId)) {
