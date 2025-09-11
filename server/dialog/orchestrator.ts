@@ -1,4 +1,5 @@
 import { parseUtterance } from "../nlu/intents";
+import { funnelService } from "../services/funnel";
 
 export async function handleDialog(ctx: {msg: any, customerId: number, tenantId: number}) {
   // FSM + воронка 3 слотов: purpose/volume/budget → deadline/conditions
@@ -13,8 +14,7 @@ export async function handleDialog(ctx: {msg: any, customerId: number, tenantId:
   // Parse user intent and entities
   const parsed = parseUtterance(text, lang);
   
-  // Get or create funnel session for this customer
-  const funnelState = await getFunnelState(customerId, tenantId);
+  // Funnel session will be managed by FunnelService when needed
   
   // Handle different intents
   switch (parsed.intent) {
@@ -40,74 +40,32 @@ export async function handleDialog(ctx: {msg: any, customerId: number, tenantId:
       return await handleHelp(lang);
     
     case "stop":
-      return await handleStop(customerId, lang);
+      return await handleStop(customerId, tenantId, lang);
     
     default:
       // If intent is unknown, check funnel state and ask next question
-      return await handleFunnel(text, funnelState, customerId, tenantId, lang);
+      return await handleFunnel(text, customerId, tenantId, lang);
   }
 }
 
-// Funnel state management
-interface FunnelState {
-  purpose?: string;
-  volume?: string;
-  budget?: string;
-  step: 'purpose' | 'volume' | 'budget' | 'complete';
+// Generate customer chat ID for funnel service
+function getCustomerChatId(customerId: number, tenantId: number): string {
+  return `${tenantId}_${customerId}`;
 }
 
-async function getFunnelState(customerId: number, tenantId: number): Promise<FunnelState> {
-  // TODO: Get from database or memory store
-  // For now, return initial state
-  return { step: 'purpose' };
-}
-
-async function updateFunnelState(customerId: number, tenantId: number, state: FunnelState): Promise<void> {
-  // TODO: Save to database or memory store
-}
-
-async function handleFunnel(text: string, state: FunnelState, customerId: number, tenantId: number, lang: "ru"|"kk") {
-  const responses = {
-    ru: {
-      purpose: "Для каких целей вам нужны товары? (например: для офиса, производства, личного использования)",
-      volume: "Какой объем или бюджет вас интересует?",
-      budget: "Какие сроки поставки и условия оплаты предпочитаете?",
-      complete: "Спасибо за информацию! Теперь я могу предложить вам подходящие товары."
-    },
-    kk: {
-      purpose: "Тауарлар қандай мақсатта керек? (мысалы: кеңсе үшін, өндіріс үшін, жеке пайдалану үшін)",
-      volume: "Қандай көлем немесе бюджет қызықтырады?",
-      budget: "Қандай жеткізу мерзімі мен төлем шарттарын қалайсыз?",
-      complete: "Ақпарат үшін рахмет! Енді сізге қолайлы тауарларды ұсына аламын."
-    }
-  };
+async function handleFunnel(text: string, customerId: number, tenantId: number, lang: "ru"|"kk") {
+  const chatId = getCustomerChatId(customerId, tenantId);
+  const funnelLang = (lang === "kk" || lang === "kz") ? "kz" : "ru"; // Convert to funnel service lang format
   
-  const langResponses = responses[lang] || responses.ru;
-  
-  // Update state based on current step
-  const newState = { ...state };
-  
-  switch (state.step) {
-    case 'purpose':
-      newState.purpose = text;
-      newState.step = 'volume';
-      await updateFunnelState(customerId, tenantId, newState);
-      return { text: langResponses.volume };
-    
-    case 'volume':
-      newState.volume = text;
-      newState.step = 'budget';
-      await updateFunnelState(customerId, tenantId, newState);
-      return { text: langResponses.budget };
-    
-    case 'budget':
-      newState.budget = text;
-      newState.step = 'complete';
-      await updateFunnelState(customerId, tenantId, newState);
-      return { text: langResponses.complete };
-    
-    default:
-      return { text: langResponses.purpose };
+  // Check if funnel session exists
+  if (!funnelService.has(chatId)) {
+    // Start new funnel session
+    const startPrompt = funnelService.start(chatId, funnelLang);
+    return { text: startPrompt };
+  } else {
+    // Continue existing funnel session
+    const nextPrompt = funnelService.next(chatId, text);
+    return { text: nextPrompt };
   }
 }
 
@@ -173,7 +131,11 @@ async function handleHelp(lang: "ru"|"kk") {
   return { text: helpText };
 }
 
-async function handleStop(customerId: number, lang: "ru"|"kk") {
+async function handleStop(customerId: number, tenantId: number, lang: "ru"|"kk") {
+  // Cancel active funnel session if exists
+  const chatId = getCustomerChatId(customerId, tenantId);
+  funnelService.cancel(chatId);
+  
   const stopText = lang === 'kk' ? 
     "Жақсы, диалогты тоқтатамын. Қайта хабарласу үшін кез келген уақытта жаза аласыз." :
     "Хорошо, останавливаю диалог. Вы можете написать в любое время для возобновления общения.";
