@@ -13,6 +13,14 @@ import { generateQrPngBuffer } from "./services/qr";
 import { telegramBotService } from "./services/telegramBot";
 import { funnelService } from "./services/funnel";
 import { detectLang } from "./services/langDetect";
+import { normalizeIncoming } from "./services/normalizer";
+import { transcribeAudio } from "./services/asr";
+import { synthesizeSpeech } from "./services/tts";
+import { handleDialog } from "./dialog/orchestrator";
+import TelegramBot from "node-telegram-bot-api";
+
+// Initialize bot for webhook response sending
+const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN || "", { polling: false });
 
 /**
  * registerRoutes(app) — регистрирует все публичные эндпоинты.
@@ -56,6 +64,247 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(updated);
     } catch (err: any) {
       console.error("PATCH /api/tenants/:id error", err);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  // ---------- Multi-tenant Webhooks ----------
+  // Telegram webhook
+  app.post("/webhook/tg/:tenantKey", async (req: Request, res: Response) => {
+    try {
+      // normalizeIncoming → ASR (если voice/audio) → orchestrator → отправка ответа (text + voice при необходимости)
+      const normalized = await normalizeIncoming(req);
+      
+      // ASR для голосовых сообщений
+      if (normalized.kind === "voice" || normalized.kind === "audio") {
+        if (normalized.mediaUrl) {
+          const transcribedText = await transcribeAudio(normalized.mediaUrl, normalized.lang);
+          normalized.text = transcribedText;
+          normalized.kind = "text"; // Конвертируем в текст после ASR
+        }
+      }
+      
+      // Найти тенанта по tenantKey
+      const tenant = await storage.getTenantByKey(normalized.tenantKey);
+      if (!tenant || !tenant.active) {
+        console.warn(`[TG webhook] Invalid or inactive tenant: ${normalized.tenantKey}`);
+        return res.status(404).json({ error: 'Tenant not found or inactive' });
+      }
+      
+      // Resolve customer ID (for now use chatId as customerId, in real app this would be database lookup)
+      const customerId = parseInt(normalized.chatId) || 1;
+      const tenantId = tenant.id;
+      
+      // Обработка диалога
+      const response = await handleDialog({
+        msg: normalized,
+        customerId,
+        tenantId
+      });
+      
+      // Отправка ответа через Telegram Bot API
+      try {
+        if (response.text) {
+          await bot.sendMessage(normalized.chatId, response.text);
+        }
+        
+        // Handle voice response if TTS is enabled
+        if (response.tts) {
+          // TODO: Send voice message with TTS buffer
+          console.log("TTS response available but voice sending not implemented yet");
+        }
+        
+        // Handle attachments
+        if (response.attachments?.length) {
+          for (const attachment of response.attachments) {
+            if (attachment.type === "image") {
+              await bot.sendPhoto(normalized.chatId, attachment.url);
+            } else if (attachment.type === "file") {
+              await bot.sendDocument(normalized.chatId, attachment.url);
+            }
+          }
+        }
+      } catch (sendError) {
+        console.error("Failed to send Telegram response:", sendError);
+      }
+      
+      res.sendStatus(200);
+    } catch (error) {
+      console.error("Telegram webhook error:", error);
+      res.sendStatus(500);
+    }
+  });
+
+  // WhatsApp webhook
+  app.post("/webhook/wa", async (req: Request, res: Response) => {
+    try {
+      // resolve tenant by phone_id/metadata → normalizeIncoming → ASR → orchestrator → ответ
+      const normalized = await normalizeIncoming(req);
+      
+      // ASR для голосовых сообщений
+      if (normalized.kind === "voice" || normalized.kind === "audio") {
+        if (normalized.mediaUrl) {
+          const transcribedText = await transcribeAudio(normalized.mediaUrl, normalized.lang);
+          normalized.text = transcribedText;
+          normalized.kind = "text";
+        }
+      }
+      
+      // Найти тенанта по WhatsApp phone_id
+      const metadata = body.entry?.[0]?.changes?.[0]?.value?.metadata;
+      const phoneId = metadata?.phone_number_id || metadata?.display_phone_number;
+      
+      let tenant;
+      if (phoneId) {
+        // Find tenant by WhatsApp phone ID
+        const tenants = await storage.getTenants();
+        tenant = tenants.find(t => t.waPhoneId === phoneId && t.active);
+      }
+      
+      // Fallback to default tenant if no specific tenant found
+      if (!tenant) {
+        tenant = await storage.getTenantByKey('default');
+      }
+      
+      if (!tenant || !tenant.active) {
+        console.warn(`[WA webhook] No active tenant found for phone_id: ${phoneId}`);
+        return res.status(404).json({ error: 'Tenant not found or inactive' });
+      }
+      
+      // Update normalized message with resolved tenant key
+      normalized.tenantKey = tenant.key;
+      
+      // Resolve customer ID (for now use chatId as customerId, in real app this would be database lookup)
+      const customerId = parseInt(normalized.chatId) || 1;
+      const tenantId = tenant.id;
+      
+      // Обработка диалога
+      const response = await handleDialog({
+        msg: normalized,
+        customerId,
+        tenantId
+      });
+      
+      // Отправка ответа через WhatsApp API
+      try {
+        const waClient = getWAClient();
+        
+        if (response.text) {
+          await waClient.sendText(normalized.chatId, response.text);
+        }
+        
+        // Handle voice response if TTS is enabled
+        if (response.tts) {
+          // TODO: Send voice message with TTS buffer
+          console.log("TTS response available but voice sending not implemented yet");
+        }
+        
+        // Handle attachments
+        if (response.attachments?.length) {
+          for (const attachment of response.attachments) {
+            // TODO: Implement WhatsApp media sending
+            console.log(`WhatsApp attachment sending not implemented: ${attachment.type} - ${attachment.url}`);
+          }
+        }
+      } catch (sendError) {
+        console.error("Failed to send WhatsApp response:", sendError);
+      }
+      
+      res.sendStatus(200);
+    } catch (error) {
+      console.error("WhatsApp webhook error:", error);
+      res.sendStatus(500);
+    }
+  });
+
+  // ---------- Catalog API ----------
+  app.get("/api/catalog/search", async (req: Request, res: Response) => {
+    try {
+      const { q, tenant, limit = 20 } = req.query;
+      // TODO: FTS+trgm поиск по каталогу
+      res.json({ results: [], query: q, tenant, limit });
+    } catch (error) {
+      console.error("Catalog search error:", error);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.get("/api/catalog/sku/:sku", async (req: Request, res: Response) => {
+    try {
+      const { sku } = req.params;
+      const { tenant } = req.query;
+      // TODO: Получить товар по SKU для тенанта
+      res.json({ sku, tenant, product: null });
+    } catch (error) {
+      console.error("Catalog SKU error:", error);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  // ---------- Cart/Order/Lead API ----------
+  app.post("/api/cart/add", async (req: Request, res: Response) => {
+    try {
+      const { tenant, chat_id, sku, qty } = req.body;
+      // TODO: Добавить товар в корзину
+      res.json({ success: true, tenant, chat_id, sku, qty });
+    } catch (error) {
+      console.error("Cart add error:", error);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.get("/api/cart", async (req: Request, res: Response) => {
+    try {
+      const { tenant, chat_id } = req.query;
+      // TODO: Получить корзину клиента
+      res.json({ items: [], tenant, chat_id });
+    } catch (error) {
+      console.error("Cart get error:", error);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.post("/api/order/checkout", async (req: Request, res: Response) => {
+    try {
+      const { tenant, chat_id, delivery, payment } = req.body;
+      // TODO: Оформление заказа
+      res.json({ success: true, orderId: "placeholder", tenant, chat_id });
+    } catch (error) {
+      console.error("Order checkout error:", error);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.post("/api/lead", async (req: Request, res: Response) => {
+    try {
+      const { tenant, customer_id, need_by_date, comment } = req.body;
+      // TODO: Создание лида
+      res.json({ success: true, leadId: "placeholder", tenant });
+    } catch (error) {
+      console.error("Lead creation error:", error);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  // ---------- Docs Generation ----------
+  app.post("/api/docs/quote", async (req: Request, res: Response) => {
+    try {
+      const { tenant, lead_id } = req.body;
+      // TODO: DOCX→PDF→GDrive → ссылка
+      res.json({ success: true, fileUrl: "https://example.com/quote.pdf", tenant });
+    } catch (error) {
+      console.error("Quote generation error:", error);
+      res.status(500).json({ error: "internal_error" });
+    }
+  });
+
+  app.post("/api/docs/invoice", async (req: Request, res: Response) => {
+    try {
+      const { tenant, order_id } = req.body;
+      // TODO: Генерация счёта
+      res.json({ success: true, fileUrl: "https://example.com/invoice.pdf", tenant });
+    } catch (error) {
+      console.error("Invoice generation error:", error);
       res.status(500).json({ error: "internal_error" });
     }
   });

@@ -282,101 +282,57 @@ function shouldAutoSearch(text: string) {
   return /[a-zA-Zа-яА-Я]/.test(text);
 }
 
-// ======================== KEYBOARDS (VisaConcierge) ========================
-const BTN_CATALOG = "🛍 Каталог";
-const BTN_CART = "🛒 Корзина";
-const BTN_CALLBACK = "📞 Перезвонить";
-const BTN_HELP = "ℹ️ Помощь";
-const BTN_2GIS = "📍 2ГИС";
-const BTN_PRICE = "💰 Цена";
-const BTN_FIND = "🔎 Поиск";
-const BTN_CALC = "🧮 Расчёт";
-const BTN_ORDER = "✅ Оформить заказ";
-const BTN_PROMO = "🎟 Промокод";
-const BTN_STOP = "⛔️ Стоп";
+// ======================== TEXT-ONLY INTERFACE ========================
+// Text commands for navigation (no keyboards)
+const TEXT_COMMANDS = {
+  CATALOG: "каталог",
+  CART: "корзина", 
+  HELP: "помощь",
+  LOCATION: "адрес",
+  CALLBACK: "перезвонить",
+  ORDER: "оформить",
+  PRICE: "цена",
+  FIND: "поиск",
+  CALC: "расчет", 
+  PROMO: "промокод",
+  CLEAR: "очистить"
+};
 
-function mainMenuKb(): any {
-  return {
-    keyboard: [
-      [{ text: BTN_CATALOG }, { text: BTN_CART }],
-      [{ text: BTN_PRICE }, { text: BTN_FIND }],
-      [{ text: BTN_CALC }, { text: BTN_ORDER }],
-      [{ text: BTN_PROMO }, { text: BTN_CALLBACK }],
-      [{ text: BTN_HELP }, { text: BTN_2GIS }],
-      [{ text: BTN_STOP }],
-    ],
-    resize_keyboard: true,
-    is_persistent: true as any,
-  };
-}
 function productCardText(p: SheetProduct) {
   const price = fmtMoney(p.price, p.currency || DEFAULT_CURRENCY);
-  // без SKU в тексте
-  return `🧱 <b>${p.name}</b>\n💵 ${price}`;
+  return `🧱 <b>${p.name}</b>\n💵 ${price}\n\nДля добавления в корзину напишите: добавить ${p.sku}`;
 }
-function productCardKb(p: SheetProduct) {
-  return {
-    inline_keyboard: [
-      [{ text: "➕ Добавить", callback_data: `add:${p.sku}` }],
-      [{ text: "⬅️ Назад к категориям", callback_data: "nav:categories" }],
-    ],
-  };
-}
-function catalogHeaderKb() {
-  return {
-    inline_keyboard: [
-      [{ text: "⬅️ Назад к категориям", callback_data: "nav:categories" }],
-    ],
-  };
-}
-function categoryKb(cats: string[]) {
-  const rows: InlineKeyboardButton[][] = cats.map((c, idx) => [
-    { text: c, callback_data: `cat:category#${idx}` },
-  ]);
-  rows.push([{ text: "⬅️ Назад", callback_data: "nav:home" }]);
-  return { inline_keyboard: rows };
-}
-function dayKb(): { inline_keyboard: InlineKeyboardButton[][] } {
-  return {
-    inline_keyboard: [
-      [{ text: "Сегодня", callback_data: "cb:day:today" }],
-      [{ text: "Завтра", callback_data: "cb:day:tomorrow" }],
-      [{ text: "Другая дата (текстом)", callback_data: "cb:day:text" }],
-    ],
-  };
-}
-function timeKb(): { inline_keyboard: InlineKeyboardButton[][] } {
-  return {
-    inline_keyboard: [
-      [{ text: "10:00", callback_data: "cb:time:10:00" }],
-      [{ text: "15:00", callback_data: "cb:time:15:00" }],
-      [{ text: "19:00", callback_data: "cb:time:19:00" }],
-      [{ text: "Другое время (текстом)", callback_data: "cb:time:text" }],
-    ],
-  };
+
+function getHelpText(): string {
+  return (
+    "ℹ️ <b>Доступные команды:</b>\n\n" +
+    "• <b>каталог</b> — просмотр товаров\n" +
+    "• <b>поиск</b> — найти товар по названию\n" +
+    "• <b>цена</b> — узнать цену товара\n" +
+    "• <b>расчет</b> — рассчитать количество\n" +
+    "• <b>корзина</b> — показать корзину\n" +
+    "• <b>оформить</b> — оформить заказ\n" +
+    "• <b>перезвонить</b> — заказать звонок\n" +
+    "• <b>промокод</b> — применить промокод\n" +
+    "• <b>адрес</b> — наша локация\n" +
+    "• <b>помощь</b> — показать эту справку\n\n" +
+    "Также можете просто написать название товара для поиска."
+  );
 }
 
 // ======================== SCREENS ========================
 async function showHome(chatId: number) {
   await bot.sendMessage(
     chatId,
-    `Добро пожаловать в ${STORE_NAME}! Я помогу найти и посчитать материалы, оформить заказ или организовать перезвон.\n\nВыберите раздел ниже 👇`,
-    { reply_markup: mainMenuKb() },
+    `Добро пожаловать в ${STORE_NAME}! Я помогу найти и посчитать материалы, оформить заказ или организовать перезвон.\n\n${getHelpText()}`,
+    { parse_mode: "HTML" },
   );
 }
 async function showHelp(chatId: number) {
   await bot.sendMessage(
     chatId,
-    "ℹ️ <b>Помощь</b>\n\n" +
-      "• <b>Каталог</b> — листайте товары и добавляйте в корзину.\n" +
-      "• <b>Поиск</b> — «🔎 Поиск», введите название.\n" +
-      "• <b>Цена</b> — «💰 Цена», укажите товар.\n" +
-      "• <b>Расчёт</b> — «🧮 Расчёт», бот спросит количество.\n" +
-      "• <b>Корзина</b> — проверка позиций, оформление, очистка.\n" +
-      "• <b>Перезвонить</b> — оставьте номер и удобное время.\n" +
-      "• <b>Промокод</b> — примените код перед оформлением.\n\n" +
-      "Локация: «📍 2ГИС».",
-    { reply_markup: mainMenuKb(), parse_mode: "HTML" },
+    getHelpText(),
+    { parse_mode: "HTML" },
   );
 }
 
@@ -386,8 +342,7 @@ async function renderCatalogPage(chatId: number, page = 0) {
   if (!items.length) {
     await bot.sendMessage(
       chatId,
-      "Каталог пуст. Напишите название товара для поиска.",
-      { reply_markup: mainMenuKb() },
+      "Каталог пуст. Напишите 'поиск' для поиска товаров.",
     );
     return;
   }
@@ -396,9 +351,7 @@ async function renderCatalogPage(chatId: number, page = 0) {
   const cur = Math.max(0, Math.min(page, pages - 1));
   catalogPageByChat.set(chatId, cur);
 
-  await bot.sendMessage(chatId, `🛍 Каталог • стр. ${cur + 1} / ${pages}`, {
-    reply_markup: catalogHeaderKb(),
-  });
+  await bot.sendMessage(chatId, `🛍 Каталог • стр. ${cur + 1} / ${pages}`);
 
   const slice = items.slice(
     cur * CATALOG_PAGE_SIZE,
@@ -408,27 +361,21 @@ async function renderCatalogPage(chatId: number, page = 0) {
     lastProdByChat.set(chatId, p);
     await bot.sendMessage(chatId, productCardText(p), {
       parse_mode: "HTML",
-      reply_markup: productCardKb(p),
     });
   }
 
   if (pages > 1) {
-    const row: any[] = [];
-    if (cur > 0)
-      row.push({ text: "« Пред.", callback_data: `cat:page:${cur - 1}` });
-    if (cur < pages - 1)
-      row.push({ text: "След. »", callback_data: `cat:page:${cur + 1}` });
-    await bot.sendMessage(chatId, "Навигация по каталогу:", {
-      reply_markup: { inline_keyboard: [row] },
-    });
+    let navText = "Навигация по каталогу:\n";
+    if (cur > 0) navText += `Напишите 'пред${cur - 1}' для предыдущей страницы\n`;
+    if (cur < pages - 1) navText += `Напишите 'след${cur + 1}' для следующей страницы\n`;
+    navText += "Напишите 'категории' чтобы вернуться к категориям";
+    await bot.sendMessage(chatId, navText);
   }
 }
 async function showCategories(chatId: number) {
   const items = await listAllProductsFromSheet();
   if (!items.length) {
-    await bot.sendMessage(chatId, "Каталог пуст. Попробуйте «🔎 Поиск».", {
-      reply_markup: mainMenuKb(),
-    });
+    await bot.sendMessage(chatId, "Каталог пуст. Напишите 'поиск' для поиска товаров.");
     return;
   }
   const cats = Array.from(
@@ -437,17 +384,20 @@ async function showCategories(chatId: number) {
   categoriesByChat.set(chatId, cats);
   allCatalogByChat.set(chatId, items);
   viewCatalogByChat.set(chatId, items);
-  await bot.sendMessage(chatId, "🗂 Выберите категорию:", {
-    reply_markup: categoryKb(cats),
+  
+  let categoryText = "🗂 Доступные категории:\n\n";
+  cats.forEach((cat, idx) => {
+    categoryText += `${idx + 1}. ${cat}\n`;
   });
+  categoryText += "\nНапишите номер или название категории для просмотра.";
+  
+  await bot.sendMessage(chatId, categoryText);
 }
 async function showCatalog(chatId: number, category: string) {
   const all = allCatalogByChat.get(chatId) || [];
   const items = all.filter((p) => (p.category || "Прочее").trim() === category);
   if (!items.length) {
-    await bot.sendMessage(chatId, "В этой категории пока пусто.", {
-      reply_markup: mainMenuKb(),
-    });
+    await bot.sendMessage(chatId, "В этой категории пока пусто. Напишите 'категории' чтобы вернуться.");
     return;
   }
   viewCatalogByChat.set(chatId, items);
@@ -458,13 +408,11 @@ async function showCatalog(chatId: number, category: string) {
 async function showCart(chatId: number) {
   const items = cartService.items(chatId);
   if (!items.length) {
-    await bot.sendMessage(chatId, "Корзина пуста.", {
-      reply_markup: mainMenuKb(),
-    });
+    await bot.sendMessage(chatId, "Корзина пуста. Напишите 'поиск' для поиска товаров.");
     return;
   }
-  const txt = formatCartText(chatId);
-  await bot.sendMessage(chatId, txt, { reply_markup: mainMenuKb() });
+  const txt = formatCartText(chatId) + "\n\nНапишите 'оформить' для оформления заказа или 'очистить' для очистки корзины.";
+  await bot.sendMessage(chatId, txt);
 }
 async function addToCart(chatId: number, sku: string, qty = 1) {
   const price = await getPriceBySkuCompat(sku.trim());
@@ -493,16 +441,13 @@ async function addToCart(chatId: number, sku: string, qty = 1) {
     chatId,
     `Добавил: ${name} × ${qty} = ${fmtMoney(price * qty)}\n` +
       `В корзине: ${positions} поз., ${totalQty} шт.\n` +
-      `Итого (без НДС): ${fmtMoney(subtotal)}`,
-    { reply_markup: mainMenuKb() },
+      `Итого (без НДС): ${fmtMoney(subtotal)}\n\nНапишите 'корзина' для просмотра.`,
   );
 }
 async function checkout(chatId: number) {
   const items = cartService.items(chatId);
   if (!items.length) {
-    await bot.sendMessage(chatId, "Корзина пуста.", {
-      reply_markup: mainMenuKb(),
-    });
+    await bot.sendMessage(chatId, "Корзина пуста.");
     return;
   }
   const { total, currency } = computeTotals(items);
@@ -510,7 +455,6 @@ async function checkout(chatId: number) {
   await bot.sendMessage(
     chatId,
     `Заказ оформлен. К оплате: ${fmtMoney(total, currency)}. Менеджер свяжется с вами.`,
-    { reply_markup: mainMenuKb() },
   );
   await appendRowCompat("orders", {
     chatId,
@@ -648,9 +592,7 @@ bot.on("message", async (msg: Message) => {
     const phone = msg.contact.phone_number;
     waitingPhone.delete(chatId);
     waitingDay.set(chatId, { phone });
-    const m = await bot.sendMessage(chatId, "Когда удобно? Выберите день:", {
-      reply_markup: dayKb(),
-    });
+    const m = await bot.sendMessage(chatId, "Когда удобно? Напишите дату: сегодня, завтра или дд.мм.гггг");
     lastPromptId.set(chatId, m.message_id);
     return;
   }
@@ -665,7 +607,7 @@ bot.on("message", async (msg: Message) => {
       waitingPhone.delete(chatId);
       waitingDay.set(chatId, { phone });
       const m = await bot.sendMessage(chatId, "Когда удобно? Выберите день:", {
-        reply_markup: dayKb(),
+  
       });
       lastPromptId.set(chatId, m.message_id);
     } else {
@@ -706,9 +648,7 @@ bot.on("message", async (msg: Message) => {
     }
     waitingDay.delete(chatId);
     waitingTime.set(chatId, { phone: rec.phone, date });
-    const m = await bot.sendMessage(chatId, "Укажите время:", {
-      reply_markup: timeKb(),
-    });
+    const m = await bot.sendMessage(chatId, "Укажите время в формате чч:мм (например, 17:00):");
     lastPromptId.set(chatId, m.message_id);
     return;
   }
@@ -728,7 +668,6 @@ bot.on("message", async (msg: Message) => {
       const m = await bot.sendMessage(
         chatId,
         `Это время уже недоступно. Укажите время минимум через ${CALLBACK_MIN_LEAD_MIN} мин.`,
-        { reply_markup: timeKb() },
       );
       lastPromptId.set(chatId, m.message_id);
       return;
@@ -743,19 +682,22 @@ bot.on("message", async (msg: Message) => {
     return;
   }
 
-  // главное меню
-  if (text === BTN_CATALOG) return showCategories(chatId);
-  if (text === BTN_CART) return showCart(chatId);
-  if (text === BTN_HELP) return showHelp(chatId);
-  if (text === BTN_2GIS)
-    return bot.sendMessage(chatId, `📍 ${DGIS_URL}`, {
-      reply_markup: mainMenuKb(),
-    });
-  if (text === BTN_CALLBACK)
+  // главное меню (текстовые команды)
+  const lowerText = text.toLowerCase();
+  if (lowerText === TEXT_COMMANDS.CATALOG) return showCategories(chatId);
+  if (lowerText === TEXT_COMMANDS.CART) return showCart(chatId);
+  if (lowerText === TEXT_COMMANDS.HELP) return showHelp(chatId);
+  if (lowerText === TEXT_COMMANDS.LOCATION)
+    return bot.sendMessage(chatId, `📍 Наша локация: ${DGIS_URL}`);
+  if (lowerText === TEXT_COMMANDS.CALLBACK)
     return startRequestCall(chatId, lastPromptId.get(chatId));
-  if (text === BTN_ORDER) return checkout(chatId);
+  if (lowerText === TEXT_COMMANDS.ORDER) return checkout(chatId);
+  if (lowerText === TEXT_COMMANDS.CLEAR) {
+    cartService.clear(chatId);
+    return bot.sendMessage(chatId, "Корзина очищена.");
+  }
 
-  if (text === BTN_PRICE) {
+  if (lowerText === TEXT_COMMANDS.PRICE) {
     clearWaiting(chatId);
     waitingPrice.add(chatId);
     await bot.sendMessage(chatId, "Укажите товар для проверки цены:");
@@ -765,21 +707,18 @@ bot.on("message", async (msg: Message) => {
     waitingPrice.delete(chatId);
     const res = await searchProductsCompat(text);
     if (!res.length)
-      return bot.sendMessage(chatId, "Ничего не найдено.", {
-        reply_markup: mainMenuKb(),
-      });
+      return bot.sendMessage(chatId, "Ничего не найдено. Попробуйте другой запрос.");
     const p = res[0];
     lastSkuByChat.set(chatId, p.sku);
     lastProdByChat.set(chatId, p);
     await bot.sendMessage(
       chatId,
       `${p.name}\nЦена: ${fmtMoney(p.price, p.currency || DEFAULT_CURRENCY)}`,
-      { reply_markup: mainMenuKb() },
     );
     return;
   }
 
-  if (text === BTN_FIND) {
+  if (lowerText === TEXT_COMMANDS.FIND) {
     clearWaiting(chatId);
     waitingFind.add(chatId);
     await bot.sendMessage(chatId, "Что ищем? Напишите название товара:");
@@ -789,22 +728,19 @@ bot.on("message", async (msg: Message) => {
     waitingFind.delete(chatId);
     const results = await searchProductsCompat(text);
     if (!results.length) {
-      await bot.sendMessage(chatId, "Ничего не найдено. Попробуйте иначе.", {
-        reply_markup: mainMenuKb(),
-      });
+      await bot.sendMessage(chatId, "Ничего не найдено. Попробуйте иначе.");
       return;
     }
     viewCatalogByChat.set(chatId, results);
     await bot.sendMessage(
       chatId,
       `🔎 Найдено: ${results.length}. Показаны первые ${Math.min(results.length, 6)}.`,
-      { reply_markup: catalogHeaderKb() },
     );
     await renderCatalogPage(chatId, 0);
     return;
   }
 
-  if (text === BTN_CALC) {
+  if (lowerText === TEXT_COMMANDS.CALC) {
     clearWaiting(chatId);
     const last = lastProdByChat.get(chatId);
     if (!last) {
@@ -830,7 +766,6 @@ bot.on("message", async (msg: Message) => {
         return bot.sendMessage(
           chatId,
           "Не нашёл такой товар. Попробуйте ещё раз.",
-          { reply_markup: mainMenuKb() },
         );
       const p = found[0];
       lastProdByChat.set(chatId, p);
@@ -850,19 +785,16 @@ bot.on("message", async (msg: Message) => {
       const price = await getPriceBySkuCompat(st.sku);
       waitingCalc.delete(chatId);
       if (price == null)
-        return bot.sendMessage(chatId, "Цена не найдена.", {
-          reply_markup: mainMenuKb(),
-        });
+        return bot.sendMessage(chatId, "Цена не найдена.");
       await bot.sendMessage(
         chatId,
         `${qty} × ${fmtMoney(price)} = ${fmtMoney(qty * price)}`,
-        { reply_markup: mainMenuKb() },
       );
       return;
     }
   }
 
-  if (text === BTN_PROMO) {
+  if (lowerText === TEXT_COMMANDS.PROMO) {
     clearWaiting(chatId);
     waitingPromo.add(chatId);
     await bot.sendMessage(chatId, "Введите промокод:");
@@ -876,17 +808,18 @@ bot.on("message", async (msg: Message) => {
       code,
       createdAt: new Date().toISOString(),
     });
-    await bot.sendMessage(chatId, `Промокод «${code}» принят.`, {
-      reply_markup: mainMenuKb(),
-    });
+    await bot.sendMessage(chatId, `Промокод «${code}» принят.`);
     return;
   }
 
-  if (text === BTN_STOP) {
+  if (lowerText === 'стоп' || lowerText === 'отмена') {
+    clearWaiting(chatId);
+    waitingPhone.delete(chatId);
+    waitingDay.delete(chatId);
+    waitingTime.delete(chatId);
     await bot.sendMessage(
       chatId,
-      "Клавиатура скрыта. Чтобы вернуться — отправьте /start.",
-      { reply_markup: { remove_keyboard: true } as any },
+      "Действие отменено. Напишите 'помощь' для списка команд.",
     );
     return;
   }
@@ -897,9 +830,7 @@ bot.on("message", async (msg: Message) => {
   if (/оформить заказ|оформляй|заказ оформ/.test(low)) return checkout(chatId);
   if (/очистить корзину|очисти корзину|сброс корзины/.test(low)) {
     cartService.clear(chatId);
-    await bot.sendMessage(chatId, "Корзина очищена.", {
-      reply_markup: mainMenuKb(),
-    });
+    await bot.sendMessage(chatId, "Корзина очищена.");
     return;
   }
   if (/перезвон|перезвонить|позвоните/.test(low))
@@ -918,7 +849,6 @@ bot.on("message", async (msg: Message) => {
       await bot.sendMessage(
         chatId,
         `${p.name}\n${intent.qty} × ${fmtMoney(p.price, p.currency || DEFAULT_CURRENCY)} = ${fmtMoney(p.price * intent.qty, p.currency || DEFAULT_CURRENCY)}`,
-        { reply_markup: productCardKb(p) },
       );
       return;
     }
@@ -928,7 +858,6 @@ bot.on("message", async (msg: Message) => {
       lastProdByChat.set(chatId, p);
       await bot.sendMessage(chatId, productCardText(p), {
         parse_mode: "HTML",
-        reply_markup: productCardKb(p),
       });
       return;
     }
@@ -939,7 +868,6 @@ bot.on("message", async (msg: Message) => {
     for (const p of results.slice(0, 12)) {
       await bot.sendMessage(chatId, productCardText(p), {
         parse_mode: "HTML",
-        reply_markup: productCardKb(p),
       });
     }
     return;
@@ -955,7 +883,6 @@ bot.on("message", async (msg: Message) => {
     lastProdByChat.set(chatId, p);
     await bot.sendMessage(chatId, productCardText(p), {
       parse_mode: "HTML",
-      reply_markup: productCardKb(p),
     });
     return;
   }
@@ -963,7 +890,6 @@ bot.on("message", async (msg: Message) => {
   for (const p of results.slice(0, 12)) {
     await bot.sendMessage(chatId, productCardText(p), {
       parse_mode: "HTML",
-      reply_markup: productCardKb(p),
     });
   }
 });
@@ -1025,14 +951,12 @@ async function handleRecognizedText(chatId: number, text: string) {
       const p = results[0];
       await bot.sendMessage(chatId, productCardText(p), {
         parse_mode: "HTML",
-        reply_markup: productCardKb(p),
       });
       return;
     }
     for (const p of results.slice(0, 6)) {
       await bot.sendMessage(chatId, productCardText(p), {
         parse_mode: "HTML",
-        reply_markup: productCardKb(p),
       });
     }
     return;
@@ -1046,7 +970,6 @@ async function handleRecognizedText(chatId: number, text: string) {
   for (const p of results.slice(0, 6)) {
     await bot.sendMessage(chatId, productCardText(p), {
       parse_mode: "HTML",
-      reply_markup: productCardKb(p),
     });
   }
 }
@@ -1108,7 +1031,7 @@ bot.on("callback_query", async (q) => {
         waitingDay.delete(chatId);
         waitingTime.set(chatId, { phone: rec.phone, date });
         const m = await bot.sendMessage(chatId, "Укажите время:", {
-          reply_markup: timeKb(),
+    
         });
         lastPromptId.set(chatId, m.message_id);
       } else if (data === "cb:day:text") {
@@ -1148,7 +1071,6 @@ bot.on("callback_query", async (q) => {
         const m = await bot.sendMessage(
           chatId,
           `Это время уже недоступно. Укажите время минимум через ${CALLBACK_MIN_LEAD_MIN} мин.`,
-          { reply_markup: timeKb() },
         );
         lastPromptId.set(chatId, m.message_id);
         return;
@@ -1212,7 +1134,6 @@ const handleRecognizedTextMessage = async (
     for (const p of results.slice(0, 6)) {
       await bot.sendMessage(chatId, productCardText(p), {
         parse_mode: "HTML",
-        reply_markup: productCardKb(p),
       });
     }
     return;
@@ -1227,7 +1148,6 @@ const handleRecognizedTextMessage = async (
   for (const p of results.slice(0, 6)) {
     await bot.sendMessage(chatId, productCardText(p), {
       parse_mode: "HTML",
-      reply_markup: productCardKb(p),
     });
   }
 };

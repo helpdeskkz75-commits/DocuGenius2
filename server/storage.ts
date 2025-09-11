@@ -73,6 +73,12 @@ export interface IStorage {
     status: string,
     description?: string,
   ): Promise<void>;
+
+  // Tenant methods
+  getTenants(): Promise<Tenant[]>;
+  getTenantByKey(key: string): Promise<Tenant | undefined>;
+  createTenant(patch: Partial<Tenant>): Promise<Tenant>;
+  updateTenant(id: string, patch: Partial<Tenant>): Promise<Tenant | null>;
 }
 
 export class MemStorage implements IStorage {

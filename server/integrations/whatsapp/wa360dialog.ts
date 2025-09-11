@@ -25,4 +25,32 @@ export class WA360Client implements WAClient {
       throw new Error(`WA send failed: ${resp.status} ${t}`);
     }
   }
+
+  async getMediaUrl(mediaId: string): Promise<string | undefined> {
+    try {
+      // First, get media information
+      const resp = await fetch(`${this.url}/media/${mediaId}`, {
+        method: 'GET',
+        headers: { 'D360-API-KEY': this.key }
+      });
+      
+      if (!resp.ok) {
+        console.error(`Failed to get WhatsApp media info: ${resp.status}`);
+        return undefined;
+      }
+      
+      const mediaInfo = await resp.json();
+      
+      // The response should contain a URL field
+      if (mediaInfo.url) {
+        return mediaInfo.url;
+      }
+      
+      console.warn('WhatsApp media response does not contain URL:', mediaInfo);
+      return undefined;
+    } catch (error) {
+      console.error('Error getting WhatsApp media URL:', error);
+      return undefined;
+    }
+  }
 }
